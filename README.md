@@ -72,7 +72,7 @@ The package installs:
 ### Installing and enabling
 
 ```
-pkg add dist/qnaplcd-menu-1.2.0.pkg
+pkg add dist/qnaplcd-menu-1.3.0.pkg
 sysrc qnaplcd_enable=YES
 service qnaplcd start
 ```
