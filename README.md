@@ -98,8 +98,12 @@ Optional `rc.conf` settings:
 With `qnaplcd_web` set (or `--web` on the command line), the menu serves a
 page that shows the display, the status and LAN lights, two lights for each
 drive bay and the two buttons, and updates as they change. Clicking a button
-(or pressing Space for Select, Enter for Enter) works exactly like pressing
-the real one, including turning the backlight on.
+(or pressing Space for Select, Enter for Enter) works like pressing the real
+one, including turning the backlight on, except that from the web the
+buttons only move around the menus: anything that runs a command (installing
+or checking for updates, starting or stopping a scrub, rebooting, shutting
+down) and answering "yes" to a question need the buttons on the NAS. The
+server refuses those presses itself (403), whatever the request looks like.
 
 - Each bay has a health strip (green with a disk, red when a notice reports
   errors for that disk, off when empty) and beside it an activity light that
@@ -126,8 +130,9 @@ service qnaplcd restart
 
 Then open `http://<nas>:8080/`. The page needs no internet access.
 
-**There is no login.** Anyone who can reach the port can use the buttons,
-which includes installing updates and rebooting. Bind it to an address only
+**There is no login.** Anyone who can reach the port can see the panel and
+move around the menus. Updates and reboots are refused from the web, but
+that is a safeguard, not access control: bind it to an address only
 trusted machines can reach (`127.0.0.1:8080` plus an SSH tunnel, or a
 management network), or put it behind a reverse proxy with authentication.
 

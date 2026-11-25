@@ -989,13 +989,29 @@ def select_pressed():
     else:
         next_screen()
 
-def enter_pressed():
+# What a press from the web panel may do: move around the menus. Anything
+# else (saying yes to a prompt, or an action that runs a command: updates,
+# scrubs, reboot) needs the real buttons. This is an allowlist checked here,
+# where the action runs, not in the HTTP handler, so no request can get
+# round it; a new menu action is refused from the web until it is added.
+def web_allowed(action):
+    func = action.func if isinstance(action, partial) else action
+    return func in (next_screen, open_menu, go_back)
+
+def enter_pressed(remote=False):
+    """remote: the press came from the web panel. Returns False if it was
+    refused."""
     if prompt_state is not None:
+        if remote:
+            return False
         answer(True)
-        return
+        return True
     action = current_item().action
     if action:
+        if remote and not web_allowed(action):
+            return False
         action()
+    return True
 
 def response_handler(command, data):
     # runs on the serial reader thread: an exception here would kill it and
@@ -1005,11 +1021,13 @@ def response_handler(command, data):
     except Exception as e:
         print(f'button handling failed: {e!r}', file=sys.stderr)
 
-def handle_buttons(command, data):
+def handle_buttons(command, data, remote=False):
+    """remote: the event came from the web panel (web_press). Returns False
+    if a remote press was refused (see web_allowed)."""
     global held, buttons_down, waking
 
     if command != 'Switch_Status':
-        return
+        return True
 
     with ui_lock:
         if buttons_down != data & 0x03:
@@ -1023,18 +1041,20 @@ def handle_buttons(command, data):
                 draw_current()
             held |= data & 0x03
             lcd_on()
-            return
+            return True
 
         pressed, held = held, 0
+        allowed = True
         if waking:
             waking = False
         elif prompt_state is None and alert:
             end_alert(sleep=False)
         elif pressed == ENTER:
-            enter_pressed()
+            allowed = enter_pressed(remote)
         elif pressed == SELECT:
             select_pressed()
         lcd_on()    # the timeout depends on the screen now showing
+        return allowed
 
 #
 # Web panel (--web): a live copy of the display, LEDs and buttons in a
@@ -1187,11 +1207,14 @@ def web_state():
     }
 
 def web_press(name):
-    # the same path as the real buttons: press, then release
+    # the same path as the real buttons: press, then release, marked remote
+    # so that nothing but menu navigation runs (web_allowed). Under ui_lock
+    # the release can't be merged with a real press from another thread.
     bit = ENTER if name == 'enter' else SELECT
     with ui_lock:
-        handle_buttons('Switch_Status', bit)
-        handle_buttons('Switch_Status', 0x00)
+        handle_buttons('Switch_Status', bit, remote=True)
+        if not handle_buttons('Switch_Status', 0x00, remote=True):
+            raise PermissionError('use the buttons on the NAS for that')
 
 def parse_listen(value):
     """'8080', '127.0.0.1:8080' or '[::]:8080' -> (address, port)."""

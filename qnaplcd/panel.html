@@ -314,7 +314,8 @@ function render(s) {
   $('enter').classList.toggle('down', s.buttons.enter);
   $('select').classList.toggle('down', s.buttons.select);
   $('screen').textContent = s.prompt ? 'Enter = yes, Select = no' : s.screen;
-  $('warn').textContent = s.connected ? '' : 'serial port not open';
+  $('warn').textContent = !s.connected ? 'serial port not open'
+    : Date.now() < pressWarnUntil ? pressWarn : '';
   const [lanClass, lanTitle] = LAN[s.lan];
   $('lan').className = 'lamp dot' + lanClass;
   $('lan-wrap').title = lanTitle;
@@ -363,12 +364,24 @@ function connect() {
   es.onerror = () => setConn(false);  // EventSource retries by itself
 }
 
+// a refused press says why for a few seconds (renders would clear it at once)
+let pressWarn = '', pressWarnUntil = 0;
+function warnPress(text) {
+  pressWarn = text; pressWarnUntil = text ? Date.now() + 5000 : 0;
+  $('warn').textContent = text;
+}
+
 async function press(name) {
   try {
     const r = await fetch('api/button/' + name, { method: 'POST', headers: { 'X-QnapLCD': '1' } });
+    if (r.status === 403) {
+      const body = await r.json().catch(() => ({}));
+      throw new Error(body.error || 'not allowed from the web');
+    }
     if (!r.ok) throw new Error(r.status);
+    warnPress('');
   } catch (e) {
-    $('warn').textContent = `${name} failed: ${e.message}`;
+    warnPress(`${name} failed: ${e.message}`);
   }
 }
 
