@@ -20,15 +20,17 @@ at the end for reference.
 ## Contents
 
 - `lcd-menu.py`: a menu similar to the stock QNAP one. It shows the host name
-  and OS version, uptime, one screen per network interface and one per ZFS
-  pool. The up and down buttons move between screens. The backlight turns off
-  after 30 seconds without a button press.
+  and OS version, uptime, notices (see below), available updates, one screen
+  per network interface and one per ZFS pool. Select moves to the next
+  screen; Enter runs the screen's action, where it has one (Updates). Lines
+  too long for the 16-column display scroll. The backlight turns off after
+  30 seconds without a button press.
 - `preinit.py`, `postinit.py`, `shutdown.py`: short scripts that print a status
   message on the display and exit.
 - `qnaplcd/`: a Python module for the A125 display. It uses pyserial and a
   background thread to pass button events to the calling program.
-- `qnapled/qnapled.c`: a small C program that stops the power LED blinking on
-  the TS-x69 (see "Power LED" below).
+- `qnapled/qnapled.c`: a small C program that drives the TS-x69's power and
+  status LEDs (see "LEDs" below).
 - `rc.d/qnaplcd`: an rc.d service that runs the menu under `daemon(8)`.
 - `packaging/build-pkg.sh`: builds a FreeBSD package containing the above.
 
@@ -69,7 +71,7 @@ The package installs:
 ### Installing and enabling
 
 ```
-pkg add dist/qnaplcd-menu-1.1.0.pkg
+pkg add dist/qnaplcd-menu-1.2.0.pkg
 sysrc qnaplcd_enable=YES
 service qnaplcd start
 ```
@@ -84,25 +86,64 @@ Optional `rc.conf` settings:
 - `qnaplcd_python`: Python interpreter (default: the version the package was
   built for)
 - `qnaplcd_flags`: extra arguments for `lcd-menu.py`, for example
-  `"--refresh 60"`
+  `"--refresh 60"`. `--no-status-led` leaves the status LED alone and
+  `--no-updates` removes the Updates screen.
 - `qnaplcd_logfile`: log file (default `/var/log/qnaplcd.log`)
 - `qnaplcd_power_led`: make the power LED steady when the service starts
   (default `YES`)
 
-### Power LED
+### Notices
 
-On QNAP's own OS the power LED blinks while the NAS boots and goes steady
-once it is up. Under FreeBSD nothing tells it to stop, so it blinks forever.
+The Notices screens list anything worth a look, and the status LED shows
+the worst of them:
 
-On the TS-x69 the LED is driven by the motherboard's IT8721F Super I/O chip
-(pin GP40). The firmware connects that pin to the chip's built-in blinker.
-`qnapled steady` disconnects the blinker and turns the LED on; the service
-runs it at start. `qnapled blink` puts the firmware's setting back, and
-`qnapled status` shows the registers. It needs root.
+| Status LED | Meaning | Notices |
+|---|---|---|
+| steady green | all fine | none |
+| alternating red/green | routine maintenance | a pool scrubbing or resilvering (with % done) |
+| steady red | errors | a pool not ONLINE, read/write/checksum errors on a disk, data errors, or a SMART problem (failed health check, reallocated, pending or uncorrectable sectors) |
 
-`qnapled` does nothing unless it finds an IT8721F whose blinker is on GP40,
-so it should be harmless on other models, but it has only been tried on a
-TS-669.
+A new error also turns the backlight on and jumps to its notice. Pools are
+checked every refresh; SMART (needs `smartmontools`) once an hour.
+
+### Updates
+
+The Updates screen shows how many package updates (`pkg`) and whether base
+system updates (`freebsd-update`) are waiting. It checks a minute after
+start and then every six hours. To install, go to the Updates screen and
+press Enter. Questions are labelled beside the buttons (Enter is beside the
+top line, Select beside the bottom one): Enter always confirms and Select
+backs out, as does waiting 30 seconds.
+
+```
+|Install    Yes >|   Enter
+|updates?    No >|   Select
+```
+
+If the update changed the kernel, the panel then asks whether to reboot;
+until the NAS restarts, the Updates screen shows "Reboot needed" and Enter
+asks again. With nothing to install, Enter checks again now. Checking takes
+a few minutes on the TS-x69's Atom (`freebsd-update fetch` reads every
+base-system file); the screen keeps the last result meanwhile. Output goes
+to the log file.
+
+### LEDs
+
+On the TS-x69 the front-panel LEDs are driven by the motherboard's IT8721F
+Super I/O chip. The pin for each LED comes from QNAP's own firmware
+(`/etc/model_3.conf` for the TS-669 Pro); each LED is on when its pin is low.
+
+- Power LED (GP40): QNAP's OS stops it blinking once the NAS is up; under
+  FreeBSD nothing does, so it blinks forever. `qnapled power steady`
+  disconnects the chip's built-in blinker and turns the LED on; the service
+  runs it at start. `qnapled power blink` puts the firmware's setting back.
+- Status LED, green (GP22) and red (GP23): red wins when both are on, so
+  there is no amber. `qnapled status-led green|red|alternate|off`; for
+  `alternate` green stays on and the chip's second blinker switches red.
+
+`qnapled status` shows the registers. It needs root. It changes nothing
+unless it finds an IT8721F with the pins set up as expected, so it should be
+harmless on other models, but it has only been tried on a TS-669.
 
 ### Running without the package
 

@@ -107,13 +107,14 @@ class QnapLCD:
         if self.connection:
             self.connection.write(bytes([0x4d, 0x06]))
 
-    def write(self, line, msg):
-        # line is 1 or 2
+    def write(self, line, msg, echo=True):
+        # line is 1 or 2; echo=False skips the stdout copy (for scrolling)
         if isinstance(msg, list):
-            self.write(1, msg[0] if len(msg) >= 1 else '')
-            self.write(2, msg[1] if len(msg) >= 2 else '')
+            self.write(1, msg[0] if len(msg) >= 1 else '', echo)
+            self.write(2, msg[1] if len(msg) >= 2 else '', echo)
         else:
-            print(f'LINE {line}: {msg}')
+            if echo:
+                print(f'LINE {line}: {msg}')
             msg = msg[:self.columns]
             line %= 2
             line = 0x00 if line else 0x01

@@ -61,7 +61,7 @@ qnaplcd_prestart()
 	fi
 	# the firmware leaves the power LED blinking; QNAP's OS would stop it
 	if checkyesno qnaplcd_power_led && [ -x "${qnaplcd_home}/qnapled" ]; then
-		"${qnaplcd_home}/qnapled" steady >/dev/null ||
+		"${qnaplcd_home}/qnapled" power steady >/dev/null ||
 		    warn "qnapled could not make the power LED steady"
 	fi
 }

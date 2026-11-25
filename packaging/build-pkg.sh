@@ -107,8 +107,8 @@ deps: {
 desc: <<EOD
 Drives the 2x16 front-panel LCD and its two buttons on QNAP NAS hardware
 running FreeBSD: host, OS version, uptime, IP addresses and ZFS pool usage,
-cycled with the up/down buttons. On the TS-x69 it also stops the power
-LED blinking.
+notices and updates, cycled with the Select button. On the TS-x69 it also
+stops the power LED blinking and shows warnings on the status LED.
 EOD
 messages: [
   { message: <<EOM
