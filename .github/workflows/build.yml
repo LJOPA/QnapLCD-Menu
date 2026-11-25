@@ -1,0 +1,55 @@
+# Build the FreeBSD package on every push to the default branch (merges
+# included) and keep the .pkg as a workflow artifact.
+#
+# GitHub has no FreeBSD runners, so the build runs in a FreeBSD VM on an
+# Ubuntu runner. The release and Python should match the NAS: the package's
+# shebangs and dependencies are pinned to the Python it was built against.
+name: Build package
+
+on:
+  push:
+    branches: [FreeBSD]
+  workflow_dispatch:
+
+env:
+  FREEBSD_RELEASE: "15.1"
+  # Python the package depends on: the `python3` metaport's version, or set
+  # e.g. "3.11" to pin it.
+  PYTHON_VERSION: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build in FreeBSD
+        uses: vmactions/freebsd-vm@v1.6.0
+        with:
+          release: ${{ env.FREEBSD_RELEASE }}
+          envs: PYTHON_VERSION
+          usesh: true
+          prepare: |
+            set -e
+            if [ -n "$PYTHON_VERSION" ]; then
+              py="python$(echo "$PYTHON_VERSION" | tr -d .)"
+              pkg install -y "$py"
+              ln -sf "/usr/local/bin/python$PYTHON_VERSION" /usr/local/bin/python3
+            else
+              pkg install -y python3
+            fi
+            flavor=$(python3 -c 'import sys; print("py%d%d" % sys.version_info[:2])')
+            pkg install -y "$flavor-pyserial"
+          run: |
+            set -e
+            python3 -m py_compile lcd-menu.py qnaplcd/__init__.py qnaplcd/web.py preinit.py postinit.py shutdown.py
+            sh -n rc.d/qnaplcd packaging/build-pkg.sh
+            packaging/build-pkg.sh
+            ls -l dist
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: qnaplcd-menu-${{ github.sha }}
+          path: dist/*.pkg
+          if-no-files-found: error
