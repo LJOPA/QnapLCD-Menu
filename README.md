@@ -1,60 +1,69 @@
+> [!WARNING]
+> **This fork contains AI-generated code.**
+>
+> The FreeBSD port, the rc.d service, the packaging script and parts of this
+> README were written with the help of an AI assistant (Claude). They have been
+> tested on one machine only. **Review the code before running it**, particularly
+> as it runs as root.
+
 # QnapLCD-Menu
 
-A simplistic package and examples using the front panel display and buttons
-on QNAP NAS devices under FreeBSD. Tested with TVS-671, but should work on
-other models that use the "A125" display with two buttons.
+Scripts for using the front-panel LCD and buttons on QNAP NAS hardware running
+FreeBSD. They work with models that have the two-button "A125" display. The
+original project was tested on a TVS-671; this fork has been tested on a
+TS-669 Pro running FreeBSD 15.1.
 
-This branch targets **plain FreeBSD**. Notes for TrueNAS CORE / SCALE are kept
-at the end as a reference for others.
+This is a fork of [stephenhouser/QnapLCD-Menu](https://github.com/stephenhouser/QnapLCD-Menu).
+This branch targets plain FreeBSD. Notes for TrueNAS CORE and SCALE are kept
+at the end for reference.
 
-# What's Included
+## Contents
 
-* *lcd-menu.py* a menu similar to the default QNAP one: host and OS version, uptime,
-  one screen per network interface and per ZFS pool, cycled with the up/down buttons.
-  The backlight turns off after 30 seconds without a button press.
+- `lcd-menu.py`: a menu similar to the stock QNAP one. It shows the host name
+  and OS version, uptime, one screen per network interface and one per ZFS
+  pool. The up and down buttons move between screens. The backlight turns off
+  after 30 seconds without a button press.
+- `preinit.py`, `postinit.py`, `shutdown.py`: short scripts that print a status
+  message on the display and exit.
+- `qnaplcd/`: a Python module for the A125 display. It uses pyserial and a
+  background thread to pass button events to the calling program.
+- `rc.d/qnaplcd`: an rc.d service that runs the menu under `daemon(8)`.
+- `packaging/build-pkg.sh`: builds a FreeBSD package containing the above.
 
-* *preinit.py*, *postinit.py*, *shutdown.py* short scripts that print a status
-  message on the LCD panel and terminate.
+## Requirements
 
-* *qnaplcd* Python package (class) for using the front-panel (A125) display. Uses
-  *pyserial* and threading to send button events to the calling program.
-
-* *rc.d/qnaplcd* an `rc.d` service that runs the menu under `daemon(8)`.
-
-* *packaging/build-pkg.sh* builds a FreeBSD package containing all of the above.
-
-# Requirements
-
-Python 3 and pyserial from FreeBSD packages, and root access (for the serial port,
-`/dev/cuau1` by default):
+- Python 3 and pyserial, installed from FreeBSD packages
+- Root access, for the serial port (`/dev/cuau1` by default)
 
 ```
 pkg install python3 py311-pyserial
 ```
 
-Use the `pyXY-pyserial` package matching your Python version (`python3 --version`).
+Install the `pyXY-pyserial` package that matches your Python version
+(`python3 --version`).
 
-# Installing as a service
+## Installing as a service
 
-## Building the package
+### Building the package
 
-On the NAS (or any FreeBSD host with the same Python version), with the
-requirements above installed:
+On the NAS, or another FreeBSD host with the same Python version, with the
+requirements installed:
 
 ```
 packaging/build-pkg.sh
 ```
 
-This produces `dist/qnaplcd-menu-<version>.pkg` (version from `VERSION`), which
-depends on `pythonXY` and `pyXY-pyserial` for the Python found on the build host
-(override with `PYTHON_VERSION=3.11`).
+This creates `dist/qnaplcd-menu-<version>.pkg`, using the version in `VERSION`.
+The package depends on the `pythonXY` and `pyXY-pyserial` packages for the
+build host's Python. Set `PYTHON_VERSION` (for example `PYTHON_VERSION=3.11`)
+to build for a different version.
 
 The package installs:
 
-* `/usr/local/libexec/qnaplcd/` – the scripts and the `qnaplcd` module
-* `/usr/local/etc/rc.d/qnaplcd` – the service script
+- `/usr/local/libexec/qnaplcd/`: the scripts and the `qnaplcd` module
+- `/usr/local/etc/rc.d/qnaplcd`: the service script
 
-## Installing and enabling
+### Installing and enabling
 
 ```
 pkg add dist/qnaplcd-menu-1.0.0.pkg
@@ -62,52 +71,58 @@ sysrc qnaplcd_enable=YES
 service qnaplcd start
 ```
 
-The menu is restarted if it exits, and its output goes to `/var/log/qnaplcd.log`.
-At system shutdown the service shows *Shutting Down...* on the panel.
+The service restarts the menu if it exits and writes its output to
+`/var/log/qnaplcd.log`. At system shutdown it shows "Shutting Down..." on the
+display.
 
-Optional `rc.conf` settings: `qnaplcd_port` (default `/dev/cuau1`),
-`qnaplcd_python` (default: the Python the package was built for),
-`qnaplcd_flags` (e.g. `"--refresh 60"`), `qnaplcd_logfile`.
+Optional `rc.conf` settings:
 
-## Running from a checkout
+- `qnaplcd_port`: serial device (default `/dev/cuau1`)
+- `qnaplcd_python`: Python interpreter (default: the version the package was
+  built for)
+- `qnaplcd_flags`: extra arguments for `lcd-menu.py`, for example
+  `"--refresh 60"`
+- `qnaplcd_logfile`: log file (default `/var/log/qnaplcd.log`)
 
-Without the package, run it directly as root from the repository root:
+### Running without the package
+
+Run the menu as root from the repository root:
 
 ```
 ./lcd-menu.py --port /dev/cuau1
 ```
 
-# Reference: TrueNAS notes
+## TrueNAS notes (reference only)
 
-Not used on this branch, but kept for anyone running TrueNAS.
+These are not used on this branch.
 
-**TrueNAS CORE (FreeBSD-based)**
+### TrueNAS CORE (FreeBSD-based)
 
-* The display is on `/dev/cuau1`, as on plain FreeBSD, and the menu code works there.
-  The first screen uses TrueNAS's `cli -c 'system version'` when `cli` exists, and
-  falls back to `freebsd-version` otherwise.
-* CORE has no usable package repository, so `pkg install py*-pyserial` usually isn't
-  possible. Use `./setup.sh` (below) to place pyserial next to `qnaplcd/` instead.
-* The boot environment is replaced on every upgrade, so anything added with `pkg add`,
-  and changes to `/etc/rc.conf`, are lost after updating TrueNAS. Prefer the
-  *Init/Shutdown Scripts* method: under *Tasks → Init/Shutdown Scripts*, add
-  `preinit.py` (pre-init), `lcd-menu.py` (post-init) and `shutdown.py` (shutdown),
-  pointing at a clone of this repository on a data pool.
+- The display is on `/dev/cuau1`, as on plain FreeBSD, and the menu code works
+  there. The first screen uses `cli -c 'system version'` if the TrueNAS `cli`
+  command exists, and `freebsd-version` otherwise.
+- CORE does not normally allow installing packages with `pkg`, so pyserial
+  usually cannot be installed that way. Use `./setup.sh` (see below) instead.
+- Each TrueNAS upgrade replaces the boot environment, which removes anything
+  installed with `pkg add` and any changes to `/etc/rc.conf`. Use Tasks >
+  Init/Shutdown Scripts instead: add `preinit.py` as a pre-init script,
+  `lcd-menu.py` as a post-init script and `shutdown.py` as a shutdown script,
+  from a copy of this repository stored on a data pool.
 
-**TrueNAS SCALE (Linux-based)**
+### TrueNAS SCALE (Linux-based)
 
-* The original upstream code targets SCALE: the serial port is `/dev/ttyS1` and the
-  network screens came from `ip -json`. This branch parses FreeBSD's `ifconfig`
-  instead, so use upstream `master` on SCALE.
-* Add `lcd-menu.py` under *System Settings → Advanced → Init/Shutdown Scripts*.
+- The upstream code targets SCALE, where the serial port is `/dev/ttyS1` and
+  network details come from `ip -json`. This branch reads FreeBSD's `ifconfig`
+  output instead, so use the upstream `master` branch on SCALE.
+- Add `lcd-menu.py` under System Settings > Advanced > Init/Shutdown Scripts.
 
-**Installing pyserial without pip or pkg**
+### Installing pyserial without pip or pkg
 
-From the repository root (the *same directory* as `qnaplcd`):
+Run this from the repository root, the directory that contains `qnaplcd/`:
 
 ```
 ./setup.sh
 ```
 
-This downloads pyserial's `serial/` package into the current directory, where the
-scripts will find it.
+It downloads pyserial's `serial/` module into the current directory, where the
+scripts can import it.
