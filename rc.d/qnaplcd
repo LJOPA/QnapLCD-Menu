@@ -1,0 +1,67 @@
+#!/bin/sh
+
+# PROVIDE: qnaplcd
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+#
+# QNAP front-panel LCD menu.
+#
+# Add the following to /etc/rc.conf (or use `sysrc`) to enable:
+#
+# qnaplcd_enable (bool):   Set to "YES" to start the LCD menu at boot.
+#                          Default: "NO"
+# qnaplcd_port (str):      Serial device of the A125 display.
+#                          Default: "/dev/cuau1"
+# qnaplcd_python (str):    Python 3 interpreter (needs pyserial).
+#                          Default: the Python the package was built for
+# qnaplcd_flags (str):     Extra arguments for lcd-menu.py (e.g. "--refresh 60").
+# qnaplcd_logfile (str):   Where the menu's output goes.
+#                          Default: "/var/log/qnaplcd.log"
+
+. /etc/rc.subr
+
+name="qnaplcd"
+rcvar="qnaplcd_enable"
+
+load_rc_config $name
+
+: ${qnaplcd_enable:="NO"}
+: ${qnaplcd_port:="/dev/cuau1"}
+: ${qnaplcd_python:="%%PYTHON%%"}
+: ${qnaplcd_logfile:="/var/log/qnaplcd.log"}
+: ${qnaplcd_home:="%%PREFIX%%/libexec/qnaplcd"}
+
+pidfile="/var/run/${name}.pid"
+command="/usr/sbin/daemon"
+# -P: pidfile of the supervisor, so `stop` signals daemon(8), which passes
+#     SIGTERM on to the menu; -r: restart the menu if it dies.
+command_args="-P ${pidfile} -r -t ${name} -o ${qnaplcd_logfile} \
+    ${qnaplcd_python} -u ${qnaplcd_home}/lcd-menu.py --port ${qnaplcd_port} ${qnaplcd_flags}"
+
+# rc.subr would put ${name}_flags before command_args, i.e. on daemon(8)'s
+# command line; they are already passed to lcd-menu.py above.
+unset qnaplcd_flags
+
+start_precmd="${name}_prestart"
+stop_postcmd="${name}_poststop"
+
+qnaplcd_prestart()
+{
+	if [ ! -x "${qnaplcd_python}" ]; then
+		err 1 "${qnaplcd_python} not found; set qnaplcd_python in rc.conf"
+	fi
+	if [ ! -c "${qnaplcd_port}" ]; then
+		warn "${qnaplcd_port} is not a character device; the display will not respond"
+	fi
+}
+
+qnaplcd_poststop()
+{
+	# rc.shutdown runs us with "faststop"; only then announce the shutdown
+	# on the panel (a plain `service qnaplcd stop` just leaves it dark).
+	if [ -n "${rc_fast}" ]; then
+		QNAPLCD_PORT="${qnaplcd_port}" ${qnaplcd_python} ${qnaplcd_home}/shutdown.py >/dev/null 2>&1
+	fi
+}
+
+run_rc_command "$1"

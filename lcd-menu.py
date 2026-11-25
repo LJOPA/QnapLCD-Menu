@@ -10,10 +10,12 @@ import threading
 import json
 import re
 import shutil
+import signal
+import argparse
 
 DISPLAY_TIMEOUT = 30    # seconds
 
-PORT = '/dev/cuau1'     # same as default
+PORT = os.environ.get('QNAPLCD_PORT', qnaplcd.DEFAULT_PORT)
 PORT_SPEED = 1200
 
 lcd = None
@@ -28,6 +30,7 @@ def lcd_on():
         lcd_timer.cancel()
 
     lcd_timer = threading.Timer(DISPLAY_TIMEOUT, lambda: lcd.backlight(False))
+    lcd_timer.daemon = True
     lcd_timer.start()
 
 def shell(cmd):
@@ -188,25 +191,45 @@ def response_handler(command, data):
         menu[menu_item]()
 
 
+def handle_sigterm(signum, frame):
+    # rc.d stop (via daemon(8)) sends SIGTERM; unwind through main()'s finally
+    sys.exit(0)
+
 def main():
     global lcd
 
-    lcd = qnaplcd.QnapLCD(PORT, PORT_SPEED, response_handler)
+    parser = argparse.ArgumentParser(description='QNAP front-panel LCD menu')
+    parser.add_argument('--port', default=PORT, help=f'serial device (default {PORT})')
+    parser.add_argument('--speed', type=int, default=PORT_SPEED, help=f'baud rate (default {PORT_SPEED})')
+    parser.add_argument('--refresh', type=int, default=30, help='seconds between interface/pool rescans (default 30)')
+    args = parser.parse_args()
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
+
+    lcd = qnaplcd.QnapLCD(args.port, args.speed, response_handler)
     lcd_on()
     lcd.reset()
     lcd.clear()
 
     lcd.write(0, [platform.node(), 'System Ready...'])
 
-    quit = False
-    while not quit:
-        add_ips_to_menu()
-        add_zpools_to_menu()
-        menu[menu_item]()
+    try:
+        while True:
+            try:
+                add_ips_to_menu()
+                add_zpools_to_menu()
+                menu[menu_item]()
+            except (subprocess.CalledProcessError, OSError, IndexError) as e:
+                # a failing shell command must not take the service down
+                print(f'refresh failed: {e}', file=sys.stderr)
 
-        print('sleep...')
-        time.sleep(30)
+            time.sleep(args.refresh)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if lcd_timer:
+            lcd_timer.cancel()
+        lcd.backlight(False)
 
-    lcd.backlight(False)
-
-main()
+if __name__ == '__main__':
+    main()

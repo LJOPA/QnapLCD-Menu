@@ -1,8 +1,11 @@
 #
 # QNAP LCD Display and Button Class
 #
+import os
 import serial
 from threading import *
+
+DEFAULT_PORT = '/dev/cuau1'
 
 # Get ID       send=0x4d, 0x00  recv=0x53, 0x01, 0xXX, 0xYY 
 # Get Button   send=0x4d, 0x06  recv=0x53, 0x05, 0xXX, 0xYY
@@ -14,8 +17,10 @@ from threading import *
 # Reset        send=0x4d, 0xFF
 
 class QnapLCD:
-    def __init__(self, port='/dev/cuau1', speed=1200, handler=None):
-        self.port = port
+    def __init__(self, port=None, speed=1200, handler=None):
+        # QNAPLCD_PORT lets the rc.d script point the one-shot scripts
+        # (preinit/postinit/shutdown) at a non-default device
+        self.port = port or os.environ.get('QNAPLCD_PORT', DEFAULT_PORT)
         self.speed = speed
 
         self.lines = 2
@@ -29,7 +34,9 @@ class QnapLCD:
 
         if handler:
             self.handler = handler
-            self.reader = Thread(target=self.serial_reader)
+            # daemon thread: it blocks forever on serial reads and must not
+            # keep the process alive once the main program exits
+            self.reader = Thread(target=self.serial_reader, daemon=True)
             self.reader.start()
 
     def _read_bytes(self, bytes=1):
