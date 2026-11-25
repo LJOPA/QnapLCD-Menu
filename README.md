@@ -105,7 +105,8 @@ the real one, including turning the backlight on.
 
 - Each bay has a health strip (green with a disk, red when a notice reports
   errors for that disk, off when empty) and beside it an activity light that
-  glows dim green while the disk is busy. Bays 1-6 are
+  glows dim green while the disk is busy. Under each bay: its number, disk
+  and the name ZFS knows it by (from `zpool status`, e.g. `DISK-5YD7DCKZ`). Bays 1-6 are
   AHCI channels 0-5 (the TS-x69's three Marvell controllers), checked on a
   TS-669.
 - The LAN light is amber while a network port has a link and dims while

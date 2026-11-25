@@ -229,6 +229,7 @@ def show_zpool():
 # (scrub, resilver) makes it alternate red/green.
 #
 notices = []
+zfs_labels = {}     # disk -> (pool, name in zpool status), for the web panel
 smart_notices = []
 
 def disk_names():
@@ -244,7 +245,9 @@ def disk_names():
     return names
 
 def pool_notices():
+    """-> (notices, {disk: (pool, name ZFS knows it by)}), from `zpool status`."""
     found = []
+    labels = {}
     output = shell('zpool status')
     names = disk_names()
 
@@ -271,11 +274,15 @@ def pool_notices():
             cols = line.split()
             if len(cols) < 5 or cols[0] in ('NAME', pool):
                 continue
+            # ada0, diskid/DISK-XXXX, gpt/label: which adaN it is, for the
+            # web panel's bay labels (raidz/mirror rows aren't disks)
+            disk = names.get(cols[0], cols[0].split('/')[-1])
+            if re.fullmatch(r'(ada|da)\d+', disk):
+                labels[disk] = (pool, cols[0])
             read, write, cksum = cols[2:5]
             if not all(re.fullmatch(r'[\d.]+[KMGT]?', c) for c in (read, write, cksum)):
                 continue
             if (read, write, cksum) != ('0', '0', '0'):
-                disk = names.get(cols[0], cols[0].split('/')[-1])
                 found.append(('error', f'{disk} errors',
                               f'read {read} write {write} checksum {cksum}'))
 
@@ -283,7 +290,7 @@ def pool_notices():
         if errors:
             found.append(('error', f'{pool} data errors',
                           f'{errors.group(1)} - see zpool status -v'))
-    return found
+    return found, labels
 
 def check_smart():
     """One pass over every disk with smartctl; results go to smart_notices."""
@@ -501,16 +508,17 @@ def redraw_if(func):
         func()
 
 def refresh():
-    global menu_item
+    global menu_item, zfs_labels
     ips, links = find_ips()
     pools = find_zpools()
-    found = pool_notices()
+    found, labels = pool_notices()
     with ui_lock:
         old_errors = {n for n in notices if n[0] == 'error'}
         ip_addresses[:] = ips
         lan_links[:] = links
         zfs_pools[:] = pools
         notices[:] = found + smart_notices
+        zfs_labels = labels     # replaced whole: web threads read it unlocked
         rebuild_menu()
         web_notify()
 
@@ -770,7 +778,8 @@ def bay_state():
     errors = {n[1].split()[0] for n in notices if n[0] == 'error'}
     return [{'disk': disk,
              'state': 'empty' if not disk else 'error' if disk in errors else 'ok',
-             'busy': disk in disk_busy}
+             'busy': disk in disk_busy,
+             'zfs': zfs_labels.get(disk)}   # [pool, name] or None
             for disk in bay_disks]
 
 def web_state():
