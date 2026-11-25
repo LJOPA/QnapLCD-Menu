@@ -85,12 +85,15 @@ def lcd_on():
 def shell(cmd):
     return subprocess.check_output(cmd, shell=True, universal_newlines=True).strip()
 
-def run(cmd, timeout=None):
-    """Run a command for its side effects; returns (exit code, output)."""
+def run(cmd, timeout=None, log=True):
+    """Run a command; returns (exit code, output). log=False keeps its
+    output out of the log (routine checks whose callers log a summary)."""
     env = dict(os.environ, PAGER='cat', ASSUME_ALWAYS_YES='yes')
     p = subprocess.run(cmd, shell=True, universal_newlines=True, env=env,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                        timeout=timeout)
+    if not log:
+        return p.returncode, p.stdout
     # freebsd-update can list thousands of files; keep the log readable
     lines = p.stdout.rstrip('\n').split('\n')
     if len(lines) > 40:
@@ -460,8 +463,10 @@ def check_smart():
     if not smartctl:
         return
     found = []
-    for disk in shell('sysctl -n kern.disks').split():
-        rc, out = run(f'{smartctl} -H -A /dev/{disk}', timeout=60)
+    disks = shell('sysctl -n kern.disks').split()
+    for disk in disks:
+        # an hourly full attribute table per disk would swamp the log
+        rc, out = run(f'{smartctl} -H -A /dev/{disk}', timeout=60, log=False)
         # "SMART overall-health self-assessment test result: PASSED"
         # (SAS disks say "SMART Health Status: OK"); disks without SMART
         # (USB sticks) have neither line and are skipped
@@ -483,6 +488,8 @@ def check_smart():
         if bad:
             found.append(('error', f'{disk} SMART',
                           'sectors: ' + ', '.join(bad), disk))
+    print(f'SMART: {len(disks)} disks checked, '
+          + ('; '.join(f'{n[1]}: {n[2]}' for n in found) or 'no problems'), flush=True)
     with ui_lock:
         smart_notices[:] = found
 
