@@ -650,7 +650,7 @@ def web_notify():
 # Drive bays, left to right, by the AHCI channel behind each. On the TS-x69
 # the six bays hang off three Marvell 88SE9125s, two ports each, which
 # FreeBSD numbers ahcich0-5; the onboard Intel ports (ahcich6+) are internal.
-# Checked on a TS-669: ada0 (ahcich0) lights bay 1, ada5 (ahcich5) bay 6.
+# Checked on a TS-669: ada0-ada5 (ahcich0-5) light bays 1-6, left to right.
 BAY_CHANNELS = ['ahcich0', 'ahcich1', 'ahcich2', 'ahcich3', 'ahcich4', 'ahcich5']
 BAY_RESCAN = 30         # seconds between looks for added/removed disks
 bay_disks = [None] * len(BAY_CHANNELS)   # adaN in each bay, None if empty
