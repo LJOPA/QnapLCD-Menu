@@ -199,11 +199,17 @@ def find_ips():
             found.append((name, iface['status']))
         else:
             found.append((name, iface['addr'] or '0.0.0.0'))
-    return found
+
+    # ports with a link, for the web panel's LAN light
+    active = [name for name in order
+              if name != 'lo0' and interfaces[name]['status'] == 'active']
+    return found, active
 
 def show_ip():
     name, addr = ip_addresses[nth(show_ip)]
     show(name, addr)
+
+lan_links = []      # interfaces with link (ifconfig "status: active")
 
 #
 # ZFS pools
@@ -496,12 +502,13 @@ def redraw_if(func):
 
 def refresh():
     global menu_item
-    ips = find_ips()
+    ips, links = find_ips()
     pools = find_zpools()
     found = pool_notices()
     with ui_lock:
         old_errors = {n for n in notices if n[0] == 'error'}
         ip_addresses[:] = ips
+        lan_links[:] = links
         zfs_pools[:] = pools
         notices[:] = found + smart_notices
         rebuild_menu()
@@ -673,11 +680,44 @@ def find_bay_disks():
                 by_channel[channel] = disks[0]
     return [by_channel.get(ch) for ch in BAY_CHANNELS]
 
-def bay_loop():
-    """Keep bay_disks current and, while someone has the web panel open,
-    which disks are busy (from `iostat`, once a second)."""
+LAN_BUSY = 4096         # bytes/s before the LAN light flickers; the page's
+                        # own updates are well under this
+lan_busy = False
+
+def interface_bytes(netstat):
+    """`netstat -ibn -f link` -> {interface: in + out bytes}.
+         Name Mtu Network Address Ipkts Ierrs Idrop Ibytes Opkts Oerrs Obytes Coll"""
+    lines = netstat.split('\n')
+    head = lines[0].split() if lines else []
+    if 'Ibytes' not in head or 'Obytes' not in head:
+        return {}
+    ib, ob = head.index('Ibytes'), head.index('Obytes')
+    counts = {}
+    for line in lines[1:]:
+        cols = line.split()
+        if len(cols) == len(head) and cols[ib].isdigit() and cols[ob].isdigit():
+            counts[cols[0]] = int(cols[ib]) + int(cols[ob])
+    return counts
+
+def activity_loop():
+    """While someone has the web panel open: which disk is in each bay
+    (every BAY_RESCAN s), and once a second which disks and whether the LAN
+    are busy. One shell per second runs `netstat` and `iostat` together.
+    Nothing runs while no page is open."""
+    global lan_busy
     last_scan = 0
+    last_bytes, last_time = None, None
     while True:
+        if not web.clients:
+            # idle: forget what was seen, so the next page starts fresh
+            last_scan, last_bytes = 0, None
+            if disk_busy or lan_busy:
+                disk_busy.clear()
+                lan_busy = False
+                web_notify()
+            time.sleep(1)
+            continue
+
         if time.time() - last_scan > BAY_RESCAN:
             last_scan = time.time()
             try:
@@ -690,32 +730,40 @@ def bay_loop():
                 web_notify()
 
         disks = [d for d in bay_disks if d]
-        if not web.clients or not disks:
-            if disk_busy:
-                disk_busy.clear()
-                web_notify()
-            time.sleep(1)
-            continue
+        # two iostat reports: since boot, then the last second; the last wins.
+        # Without disks, sleep 1 keeps the pace.
+        disk_cmd = f'iostat -x -d -c 2 -w 1 {" ".join(disks)}' if disks else 'sleep 1'
         try:
-            # two reports: since boot, then the last second; the last wins
-            out = shell(f'iostat -x -d -c 2 -w 1 {" ".join(disks)}')
+            out = shell(f'netstat -ibn -f link; echo ---; {disk_cmd}')
         except (subprocess.CalledProcessError, OSError) as e:
-            print(f'iostat failed: {e}', file=sys.stderr)
+            print(f'activity check failed: {e}', file=sys.stderr)
             time.sleep(BAY_RESCAN)
             continue
-        busy = {}
-        for line in out.split('\n'):
+        now_time = time.time()
+        net_out, _, disk_out = out.partition('\n---\n')
+
+        rate = {}
+        for line in disk_out.split('\n'):
             cols = line.split()
-            # device r/s w/s kr/s kw/s ...
+            # device r/s w/s kr/s kw/s ... (the second report overwrites the first)
             if len(cols) >= 5 and cols[0] in disks:
                 try:
-                    busy[cols[0]] = float(cols[3]) + float(cols[4]) > 0
+                    rate[cols[0]] = float(cols[3]) + float(cols[4])
                 except ValueError:
                     pass
-        now = {d for d, b in busy.items() if b}
-        if now != disk_busy:
+        busy = {d for d, kb in rate.items() if kb > 0}
+
+        counts = interface_bytes(net_out)
+        total = sum(counts.get(name, 0) for name in lan_links)
+        net_busy = False
+        if last_bytes is not None and now_time > last_time:
+            net_busy = (total - last_bytes) / (now_time - last_time) > LAN_BUSY
+        last_bytes, last_time = total, now_time
+
+        if busy != disk_busy or net_busy != lan_busy:
             disk_busy.clear()
-            disk_busy.update(now)
+            disk_busy.update(busy)
+            lan_busy = net_busy
             web_notify()
 
 def bay_state():
@@ -741,6 +789,7 @@ def web_state():
         'screen': [menu_item + 1, len(menu)],
         'connected': lcd.connection is not None,
         'bays': bay_state(),
+        'lan': 'busy' if lan_busy and lan_links else 'on' if lan_links else 'off',
     }
 
 def web_press(name):
@@ -801,7 +850,7 @@ def main():
         web = WebPanel(*args.web, web_state, web_press)
         lcd.on_change = web_notify
         web.start()
-        threading.Thread(target=bay_loop, daemon=True).start()
+        threading.Thread(target=activity_loop, daemon=True).start()
     lcd_on()
     lcd.reset()
     lcd.clear()

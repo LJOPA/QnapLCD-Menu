@@ -22,6 +22,7 @@
     --led-off: #2a2d31;
     --green: #3ddc6a;
     --red: #ff4a3d;
+    --amber: #ff9a2e;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
@@ -198,6 +199,13 @@
     50% { background: var(--green); box-shadow: 0 0 1.2cqi var(--green); }
   }
   .led.undriven .lamp { opacity: .55; }
+  /* LAN: amber with link, flickering with traffic */
+  .lamp.amber { background: var(--amber); box-shadow: 0 0 1.2cqi var(--amber); }
+  .lamp.amber-busy { animation: flicker-amber .18s steps(1, end) infinite; }
+  @keyframes flicker-amber {
+    0%  { background: var(--amber); box-shadow: 0 0 1.2cqi var(--amber); }
+    50% { background: var(--led-off); box-shadow: inset 0 1px 2px rgba(0,0,0,.6); }
+  }
 
   /* one line of strips across the front: power, then a strip per bay */
   .strips {
@@ -317,7 +325,7 @@
       </div>
       <div class="leds">
         <div class="led" id="status-wrap"><span class="lamp dot" id="status"></span><span class="label">Status</span></div>
-        <div class="led undriven" title="not reported"><span class="lamp dot"></span><span class="label">LAN</span></div>
+        <div class="led" id="lan-wrap"><span class="lamp dot" id="lan"></span><span class="label">LAN</span></div>
         <div class="led undriven" title="not reported"><span class="lamp dot"></span><span class="label">USB</span></div>
         <div class="led undriven" title="not reported"><span class="lamp dot"></span><span class="label asis">eSATA</span></div>
       </div>
@@ -366,6 +374,9 @@ function render(s) {
   $('select').classList.toggle('down', s.buttons.select);
   $('screen').textContent = s.prompt ? 'Enter = yes, Select = no' : `screen ${s.screen[0]} of ${s.screen[1]}`;
   $('warn').textContent = s.connected ? '' : 'serial port not open';
+  const lan = s.lan || 'off';
+  $('lan').className = 'lamp dot' + (lan === 'busy' ? ' amber-busy' : lan === 'on' ? ' amber' : '');
+  $('lan-wrap').title = lan === 'off' ? 'LAN: no link' : lan === 'busy' ? 'LAN: link, traffic' : 'LAN: link';
   renderBays(s.bays || []);
 }
 

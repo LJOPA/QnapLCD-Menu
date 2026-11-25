@@ -98,14 +98,22 @@ Optional `rc.conf` settings:
 ### Web panel
 
 With `qnaplcd_web` set (or `--web` on the command line), the menu serves a
-page that shows the display, the power and status LEDs, a light for each
-drive bay and the two buttons, and updates as they change. A bay light is
-green when a disk is in the bay, flickers while the disk is busy (checked
-once a second while the page is open) and turns red when a notice reports
-errors for that disk. Bays 1-6 are taken to be AHCI channels 0-5 (the TS-x69's
-three Marvell controllers), checked on a TS-669. Clicking a button (or pressing Space for Select,
-Enter for Enter) works exactly like pressing the real one, including turning
-the backlight on.
+page that shows the display, the power, status and LAN lights, a light for each
+drive bay and the two buttons, and updates as they change. Clicking a button
+(or pressing Space for Select, Enter for Enter) works exactly like pressing
+the real one, including turning the backlight on.
+
+- A bay light is green when a disk is in the bay, flickers while the disk is
+  busy and turns red when a notice reports errors for that disk. Bays 1-6 are
+  AHCI channels 0-5 (the TS-x69's three Marvell controllers), checked on a
+  TS-669.
+- The LAN light is amber while a network port has a link and flickers with
+  traffic over 4 KB/s (the page's own updates stay below that).
+- USB and eSATA are drawn but not reported.
+
+Disk and network activity are checked once a second, and the disks in the
+bays every 30 seconds, only while a page is open. With no page open the web
+panel runs nothing in the background.
 
 ```
 sysrc qnaplcd_web=8080
