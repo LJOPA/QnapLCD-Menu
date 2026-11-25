@@ -98,17 +98,22 @@ Optional `rc.conf` settings:
 ### Web panel
 
 With `qnaplcd_web` set (or `--web` on the command line), the menu serves a
-page that shows the display, the power, status and LAN lights, a light for each
+page that shows the display, the status and LAN lights, two lights for each
 drive bay and the two buttons, and updates as they change. Clicking a button
 (or pressing Space for Select, Enter for Enter) works exactly like pressing
 the real one, including turning the backlight on.
 
-- A bay light is green when a disk is in the bay, flickers while the disk is
-  busy and turns red when a notice reports errors for that disk. Bays 1-6 are
+- Each bay has a health strip (green with a disk, red when a notice reports
+  errors for that disk, off when empty) and beside it an activity light that
+  glows dim green while the disk is busy. Bays 1-6 are
   AHCI channels 0-5 (the TS-x69's three Marvell controllers), checked on a
   TS-669.
-- The LAN light is amber while a network port has a link and flickers with
-  traffic over 4 KB/s (the page's own updates stay below that).
+- The LAN light is amber while a network port has a link and dims while
+  there is traffic over 4 KB/s (the page's own updates stay below that).
+- Where the NAS has its power strip, the page shows its own connection
+  instead, labelled "web link": green while it is getting updates, red if
+  the connection to the NAS is lost (the buttons are disabled until it is
+  back).
 - USB and eSATA are drawn but not reported.
 
 Disk and network activity are checked once a second, and the disks in the

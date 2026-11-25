@@ -35,30 +35,13 @@
     padding: 24px;
   }
   main { width: min(760px, 100%); }
-  header {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: 10px;
-    color: var(--muted);
-    font-size: 12px;
-  }
-  #conn::before {
-    content: "";
-    display: inline-block;
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    margin-right: 6px;
-    background: var(--muted);
-    vertical-align: 0;
-  }
-  #conn.live::before { background: var(--green); }
-  #conn.down::before { background: var(--red); }
 
   /*
-   * Laid out like the TS-x69 front: a narrow left section (name, power
-   * strip) and, to its right, a dark band holding the display, the two
-   * buttons and the small LEDs, above a label for each drive bay.
-   * The power strip and the bay strips share one line across the front.
+   * Laid out like the TS-x69 front: a narrow left section with the name,
+   * and to its right a dark band holding the display, the two buttons and
+   * the small LEDs. One line of lights runs across the front: where the NAS
+   * has its power strip, this page's connection light; then each drive bay's
+   * health strip and activity dot, with a label underneath.
    * Sizes are in cqi (percent of the chassis width) so it scales as one.
    */
   .chassis {
@@ -175,15 +158,16 @@
     50% { background: var(--green); box-shadow: 0 0 1.2cqi var(--green); }
   }
   .led.undriven .lamp { opacity: .55; }
-  /* LAN: amber with link, flickering with traffic */
+  /* activity fades rather than blinks: a fast-blinking LED reads as dim */
+  #lan, .act { transition: background .4s, box-shadow .4s; }
+  /* LAN: amber with link, dimmed while there is traffic */
   .lamp.amber { background: var(--amber); box-shadow: 0 0 1.2cqi var(--amber); }
-  .lamp.amber-busy { animation: flicker-amber .18s steps(1, end) infinite; }
-  @keyframes flicker-amber {
-    0%  { background: var(--amber); box-shadow: 0 0 1.2cqi var(--amber); }
-    50% { background: var(--led-off); box-shadow: inset 0 1px 2px rgba(0,0,0,.6); }
+  .lamp.amber-dim {
+    background: color-mix(in srgb, var(--amber) 45%, var(--led-off));
+    box-shadow: 0 0 .6cqi color-mix(in srgb, var(--amber) 40%, transparent);
   }
 
-  /* one line of strips across the front: power, then a strip per bay */
+  /* one line of lights across the front: connection, then each bay */
   .strips {
     grid-row: 2;
     grid-column: 1 / -1;
@@ -195,12 +179,13 @@
     height: 2.2cqi;
     align-items: center;
   }
-  .strips .power { display: flex; justify-content: center; }
+  .strips .link { display: flex; justify-content: center; }
+  #link { width: 7cqi; }
+  #link-label { grid-area: 3 / 1; padding-top: 1.2cqi; text-align: center; line-height: 1.4; }
   .bay-label { text-align: center; line-height: 1.4; }
   .bay-label.empty { opacity: .45; }
   .asis { text-transform: none; }
   .bar { height: .7cqi; min-height: 3px; border-radius: .4cqi; }
-  #power { width: 7cqi; }
   #bay-strips, #bay-labels {
     display: grid;
     grid-template-columns: repeat(var(--bays, 6), 1fr);
@@ -208,7 +193,9 @@
     padding: 0 1.4cqi;
   }
   #bay-strips { justify-items: center; }
-  #bay-strips .bar { width: 5cqi; }
+  .bay-lights { display: flex; align-items: center; gap: .9cqi; }
+  .bay-lights .bar { width: 4.4cqi; }
+  .bay-lights .dot { width: 1cqi; height: 1cqi; min-width: 5px; min-height: 5px; }
   /* under each bay strip: its number and disk */
   #bay-labels {
     grid-area: 3 / 2;
@@ -216,11 +203,11 @@
     padding-bottom: 1.6cqi;
     justify-items: center;
   }
-  /* drive bay lights: green = disk present, flickering = I/O, red = error */
-  .lamp.busy { animation: flicker .18s steps(1, end) infinite; }
-  @keyframes flicker {
-    0%  { background: var(--green); box-shadow: 0 0 1.2cqi var(--green); }
-    50% { background: var(--led-off); box-shadow: inset 0 1px 2px rgba(0,0,0,.6); }
+  /* drive bays: the strip is health (green = OK, red = errors, off =
+     empty), the dot beside it glows dim green while the disk is busy */
+  .lamp.act-on {
+    background: color-mix(in srgb, var(--green) 45%, var(--led-off));
+    box-shadow: 0 0 .6cqi color-mix(in srgb, var(--green) 40%, transparent);
   }
 
   footer {
@@ -250,7 +237,6 @@
 </head>
 <body>
 <main>
-  <header><span id="conn">connecting</span></header>
 
   <div class="chassis">
     <div class="side-top"><h1 id="host">&nbsp;</h1></div>
@@ -279,10 +265,11 @@
     </div>
 
     <div class="strips">
-      <div class="power" title="power"><span class="lamp bar green" id="power"></span></div>
+      <div class="link"><span class="lamp bar" id="link"></span></div>
       <div id="bay-strips"></div>
     </div>
 
+    <div class="label" id="link-label" title="this page's connection to the NAS, not the power LED">Connecting<br><span class="asis">web link</span></div>
     <div id="bay-labels"></div>
   </div>
 
@@ -317,7 +304,7 @@ function render(s) {
   $('screen').textContent = s.prompt ? 'Enter = yes, Select = no' : `screen ${s.screen[0]} of ${s.screen[1]}`;
   $('warn').textContent = s.connected ? '' : 'serial port not open';
   const lan = s.lan || 'off';
-  $('lan').className = 'lamp dot' + (lan === 'busy' ? ' amber-busy' : lan === 'on' ? ' amber' : '');
+  $('lan').className = 'lamp dot' + (lan === 'busy' ? ' amber-dim' : lan === 'on' ? ' amber' : '');
   $('lan-wrap').title = lan === 'off' ? 'LAN: no link' : lan === 'busy' ? 'LAN: link, traffic' : 'LAN: link';
   renderBays(s.bays || []);
 }
@@ -328,14 +315,18 @@ function renderBays(bays) {
     document.querySelector('.chassis').style.setProperty('--bays', bays.length || 1);
     strips.innerHTML = labels.innerHTML = '';
     bays.forEach((_, i) => {
-      strips.appendChild(document.createElement('span')).className = 'lamp bar';
+      const lights = strips.appendChild(document.createElement('span'));
+      lights.className = 'bay-lights';
+      lights.innerHTML = '<span class="lamp bar"></span><span class="lamp dot act"></span>';
       labels.appendChild(document.createElement('div')).className = 'label bay-label';
     });
   }
   bays.forEach((b, i) => {
-    const on = b.state === 'error' ? ' red' : b.state === 'ok' ? (b.busy ? ' busy' : ' green') : '';
-    const title = b.disk ? `bay ${i + 1}: ${b.disk}${b.state === 'error' ? ' (errors)' : ''}` : `bay ${i + 1}: empty`;
-    strips.children[i].className = 'lamp bar' + on;
+    const health = b.state === 'error' ? ' red' : b.state === 'ok' ? ' green' : '';
+    const title = b.disk ? `bay ${i + 1}: ${b.disk}${b.state === 'error' ? ' (errors)' : ''}${b.busy ? ', busy' : ''}` : `bay ${i + 1}: empty`;
+    const [bar, act] = strips.children[i].children;
+    bar.className = 'lamp bar' + health;
+    act.className = 'lamp dot act' + (b.busy ? ' act-on' : '');
     strips.children[i].title = title;
     const label = labels.children[i];
     label.classList.toggle('empty', !b.disk);
@@ -344,17 +335,18 @@ function renderBays(bays) {
   });
 }
 
+// where the power strip is on the NAS: whether this page is getting updates
 function setConn(cls, text) {
-  $('conn').className = cls;
-  $('conn').textContent = text;
+  $('link').className = 'lamp bar' + (cls === 'live' ? ' green' : cls === 'down' ? ' red' : '');
+  $('link-label').innerHTML = `${text}<br><span class="asis">web link</span>`;
   for (const b of ['enter', 'select']) $(b).disabled = cls !== 'live';
 }
 
 function connect() {
   const es = new EventSource('api/events');
-  es.onopen = () => setConn('live', 'live');
+  es.onopen = () => setConn('live', 'Live');
   es.onmessage = e => render(JSON.parse(e.data));
-  es.onerror = () => setConn('down', 'reconnecting');  // EventSource retries by itself
+  es.onerror = () => setConn('down', 'Offline');  // EventSource retries by itself
 }
 
 async function press(name) {
