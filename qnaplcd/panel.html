@@ -10,7 +10,6 @@
     --chassis: #26292d;
     --chassis-low: #1f2125;
     --band: #0e0f11;
-    --tray: #16181b;
     --edge: #3a3e44;
     --text: #c9ccd1;
     --muted: #7d828a;
@@ -57,8 +56,8 @@
 
   /*
    * Laid out like the TS-x69 front: a narrow left section (name, power
-   * strip, Power and Copy) and, to its right, a dark band holding the
-   * display, the two buttons and the small LEDs, above six drive trays.
+   * strip) and, to its right, a dark band holding the display, the two
+   * buttons and the small LEDs, above a label for each drive bay.
    * The power strip and the bay strips share one line across the front.
    * Sizes are in cqi (percent of the chassis width) so it scales as one.
    */
@@ -82,40 +81,17 @@
   }
 
   /* left section */
-  .side-top { grid-area: 1 / 1; padding: 4cqi 2.5cqi; }
+  .side-top { grid-area: 1 / 1; padding: 4cqi 2cqi; }
   #host {
     margin: 0;
-    font-size: clamp(11px, 2.6cqi, 22px);
+    font-size: clamp(9px, 2.6cqi, 22px);
     font-weight: 700;
-    letter-spacing: .04em;
+    letter-spacing: .06em;
+    text-transform: uppercase;
     color: #e3e5e8;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .side-bottom {
-    grid-area: 3 / 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 1.6cqi;
-    padding: 3cqi 0 3.5cqi;
-  }
-  .box {
-    width: 10cqi;
-    aspect-ratio: 1.45;
-    border: 1px solid #000;
-    border-radius: .7cqi;
-    background: linear-gradient(180deg, #2c2f34, #222428);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: .9cqi;
-  }
-  .usb { width: 3.6cqi; height: 1.5cqi; border: 1px solid #555a62; border-radius: .2cqi; background: #0b0c0e; }
-
   /* display band */
   .band {
     grid-area: 1 / 2;
@@ -220,9 +196,12 @@
     align-items: center;
   }
   .strips .power { display: flex; justify-content: center; }
+  .bay-label { text-align: center; line-height: 1.4; }
+  .bay-label.empty { opacity: .45; }
+  .asis { text-transform: none; }
   .bar { height: .7cqi; min-height: 3px; border-radius: .4cqi; }
   #power { width: 7cqi; }
-  #bay-strips, #trays {
+  #bay-strips, #bay-labels {
     display: grid;
     grid-template-columns: repeat(var(--bays, 6), 1fr);
     gap: 1.2cqi;
@@ -230,51 +209,19 @@
   }
   #bay-strips { justify-items: center; }
   #bay-strips .bar { width: 5cqi; }
+  /* under each bay strip: its number and disk */
+  #bay-labels {
+    grid-area: 3 / 2;
+    padding-top: 1.2cqi;
+    padding-bottom: 1.6cqi;
+    justify-items: center;
+  }
   /* drive bay lights: green = disk present, flickering = I/O, red = error */
   .lamp.busy { animation: flicker .18s steps(1, end) infinite; }
   @keyframes flicker {
     0%  { background: var(--green); box-shadow: 0 0 1.2cqi var(--green); }
     50% { background: var(--led-off); box-shadow: inset 0 1px 2px rgba(0,0,0,.6); }
   }
-
-  /* trays: shorter than the real ones, a latch circle and a grille */
-  #trays {
-    grid-area: 3 / 2;
-    padding-top: 1.2cqi;
-    padding-bottom: 1.6cqi;
-    border-left: 1px solid #000;
-  }
-  .tray {
-    height: 30cqi;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 1.6cqi;
-    padding: 2cqi 0 1.4cqi;
-    background: linear-gradient(180deg, #1c1e21, var(--tray));
-    border: 1px solid #000;
-    border-radius: .5cqi;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
-  }
-  .tray.empty { opacity: .45; }
-  .latch {
-    width: 5.2cqi;
-    aspect-ratio: 1;
-    border-radius: 50%;
-    border: .5cqi solid #0a0b0c;
-    background: radial-gradient(circle at 40% 35%, #c9ccd1, #7d828a 70%);
-    box-shadow: 0 0 0 1px #34383d;
-  }
-  .tray.empty .latch { background: #2a2d31; }
-  .grille {
-    flex: 1;
-    width: 70%;
-    background: repeating-linear-gradient(90deg, #0a0b0c 0 .5cqi, transparent .5cqi 1.4cqi);
-    border-radius: .3cqi;
-    opacity: .9;
-  }
-  .tray .label { text-align: center; line-height: 1.3; }
-  .asis { text-transform: none; }
 
   footer {
     margin-top: 12px;
@@ -336,12 +283,7 @@
       <div id="bay-strips"></div>
     </div>
 
-    <div class="side-bottom" aria-hidden="true">
-      <div class="box"><span class="label">&#x23FB; Power</span></div>
-      <div class="box"><span class="label">Copy</span><span class="usb"></span></div>
-    </div>
-
-    <div id="trays"></div>
+    <div id="bay-labels"></div>
   </div>
 
   <footer>
@@ -361,7 +303,7 @@ for (const row of rows)
 
 function render(s) {
   document.title = `${s.host} - front panel`;
-  $('host').textContent = s.host;
+  $('host').textContent = $('host').title = s.host;
   $('lcd').classList.toggle('lit', s.backlight);
   s.lines.forEach((text, r) => {
     const cells = rows[r].children;
@@ -381,15 +323,13 @@ function render(s) {
 }
 
 function renderBays(bays) {
-  const strips = $('bay-strips'), trays = $('trays');
+  const strips = $('bay-strips'), labels = $('bay-labels');
   if (strips.children.length !== bays.length) {
     document.querySelector('.chassis').style.setProperty('--bays', bays.length || 1);
-    strips.innerHTML = trays.innerHTML = '';
+    strips.innerHTML = labels.innerHTML = '';
     bays.forEach((_, i) => {
       strips.appendChild(document.createElement('span')).className = 'lamp bar';
-      const tray = trays.appendChild(document.createElement('div'));
-      tray.className = 'tray';
-      tray.innerHTML = '<span class="latch"></span><span class="grille"></span><span class="label"></span>';
+      labels.appendChild(document.createElement('div')).className = 'label bay-label';
     });
   }
   bays.forEach((b, i) => {
@@ -397,10 +337,10 @@ function renderBays(bays) {
     const title = b.disk ? `bay ${i + 1}: ${b.disk}${b.state === 'error' ? ' (errors)' : ''}` : `bay ${i + 1}: empty`;
     strips.children[i].className = 'lamp bar' + on;
     strips.children[i].title = title;
-    const tray = trays.children[i];
-    tray.classList.toggle('empty', !b.disk);
-    tray.title = title;
-    tray.querySelector('.label').innerHTML = `${i + 1}<br><span class="asis">${b.disk || '&nbsp;'}</span>`;
+    const label = labels.children[i];
+    label.classList.toggle('empty', !b.disk);
+    label.title = title;
+    label.innerHTML = `${i + 1}<br><span class="asis">${b.disk || 'empty'}</span>`;
   });
 }
 
