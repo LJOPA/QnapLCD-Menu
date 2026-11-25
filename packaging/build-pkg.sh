@@ -75,7 +75,12 @@ chmod 0755 "$STAGE$PREFIX/etc/rc.d/qnaplcd"
 
 # --- packing list (paths relative to PREFIX) -------------------------------
 PLIST="$WORK/plist"
-(cd "$STAGE$PREFIX" && find . -type f | sed 's|^\./||' | sort) > "$PLIST"
+# files are staged as the building user; install them as root:wheel regardless
+{
+    echo "@owner root"
+    echo "@group wheel"
+    (cd "$STAGE$PREFIX" && find . -type f | sed 's|^\./||' | sort)
+} > "$PLIST"
 
 # --- manifest ----------------------------------------------------------------
 cat > "$WORK/+MANIFEST" <<MANIFEST

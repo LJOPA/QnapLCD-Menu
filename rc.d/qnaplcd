@@ -34,8 +34,10 @@ load_rc_config $name
 pidfile="/var/run/${name}.pid"
 command="/usr/sbin/daemon"
 # -P: pidfile of the supervisor, so `stop` signals daemon(8), which passes
-#     SIGTERM on to the menu; -r: restart the menu if it dies.
-command_args="-P ${pidfile} -r -t ${name} -o ${qnaplcd_logfile} \
+#     SIGTERM on to the menu; -r: restart the menu if it dies;
+# -f: detach from the caller's stdio (otherwise `service start` over ssh,
+#     or the boot console, stays attached); output still goes to -o.
+command_args="-P ${pidfile} -f -r -t ${name} -o ${qnaplcd_logfile} \
     ${qnaplcd_python} -u ${qnaplcd_home}/lcd-menu.py --port ${qnaplcd_port} ${qnaplcd_flags}"
 
 # rc.subr would put ${name}_flags before command_args, i.e. on daemon(8)'s
