@@ -311,7 +311,7 @@ function render(s) {
   $('status-wrap').title = s.status_led_driven ? '' : 'not driven on this machine (no qnapled or --no-status-led)';
   $('enter').classList.toggle('down', s.buttons.enter);
   $('select').classList.toggle('down', s.buttons.select);
-  $('screen').textContent = s.prompt ? 'Enter = yes, Select = no' : `screen ${s.screen[0]} of ${s.screen[1]}`;
+  $('screen').textContent = s.prompt ? 'Enter = yes, Select = no' : s.screen;
   $('warn').textContent = s.connected ? '' : 'serial port not open';
   const [lanClass, lanTitle] = LAN[s.lan];
   $('lan').className = 'lamp dot' + lanClass;
