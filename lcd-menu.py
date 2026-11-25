@@ -505,6 +505,7 @@ def refresh():
         zfs_pools[:] = pools
         notices[:] = found + smart_notices
         rebuild_menu()
+        web_notify()
 
         if any(n[0] == 'error' for n in notices):
             set_status_led('red')
@@ -646,6 +647,84 @@ def web_notify():
     if web:
         web.notify()
 
+# Drive bays, left to right, by the AHCI channel behind each. On the TS-x69
+# the six bays hang off three Marvell 88SE9125s, two ports each, which
+# FreeBSD numbers ahcich0-5; the onboard Intel ports (ahcich6+) are internal.
+# Bay order assumed to follow channel order.
+BAY_CHANNELS = ['ahcich0', 'ahcich1', 'ahcich2', 'ahcich3', 'ahcich4', 'ahcich5']
+BAY_RESCAN = 30         # seconds between looks for added/removed disks
+bay_disks = [None] * len(BAY_CHANNELS)   # adaN in each bay, None if empty
+disk_busy = set()       # disks with I/O in the last second
+
+def find_bay_disks():
+    """Bay -> disk from `camcontrol devlist -v` (needs root):
+         scbus0 on ahcich0 bus 0:
+         <ST2000DL003-9VT166 CC32>  at scbus0 target 0 lun 0 (pass0,ada0)"""
+    by_channel, channel = {}, None
+    for line in shell('camcontrol devlist -v').split('\n'):
+        match = re.match(r'scbus\d+ on (\S+) bus', line)
+        if match:
+            channel = match.group(1)
+            continue
+        match = re.search(r'\(([^)]*)\)\s*$', line)
+        if match and channel:
+            disks = [d for d in match.group(1).split(',') if re.fullmatch(r'(ada|da)\d+', d)]
+            if disks:
+                by_channel[channel] = disks[0]
+    return [by_channel.get(ch) for ch in BAY_CHANNELS]
+
+def bay_loop():
+    """Keep bay_disks current and, while someone has the web panel open,
+    which disks are busy (from `iostat`, once a second)."""
+    last_scan = 0
+    while True:
+        if time.time() - last_scan > BAY_RESCAN:
+            last_scan = time.time()
+            try:
+                found = find_bay_disks()
+            except (subprocess.CalledProcessError, OSError) as e:
+                print(f'bay scan failed: {e}', file=sys.stderr)
+                found = bay_disks
+            if found != bay_disks:
+                bay_disks[:] = found
+                web_notify()
+
+        disks = [d for d in bay_disks if d]
+        if not web.clients or not disks:
+            if disk_busy:
+                disk_busy.clear()
+                web_notify()
+            time.sleep(1)
+            continue
+        try:
+            # two reports: since boot, then the last second; the last wins
+            out = shell(f'iostat -x -d -c 2 -w 1 {" ".join(disks)}')
+        except (subprocess.CalledProcessError, OSError) as e:
+            print(f'iostat failed: {e}', file=sys.stderr)
+            time.sleep(BAY_RESCAN)
+            continue
+        busy = {}
+        for line in out.split('\n'):
+            cols = line.split()
+            # device r/s w/s kr/s kw/s ...
+            if len(cols) >= 5 and cols[0] in disks:
+                try:
+                    busy[cols[0]] = float(cols[3]) + float(cols[4]) > 0
+                except ValueError:
+                    pass
+        now = {d for d, b in busy.items() if b}
+        if now != disk_busy:
+            disk_busy.clear()
+            disk_busy.update(now)
+            web_notify()
+
+def bay_state():
+    errors = {n[1].split()[0] for n in notices if n[0] == 'error'}
+    return [{'disk': disk,
+             'state': 'empty' if not disk else 'error' if disk in errors else 'ok',
+             'busy': disk in disk_busy}
+            for disk in bay_disks]
+
 def web_state():
     # no ui_lock: this runs on the web server's threads and only reads
     with lcd.state_lock:
@@ -661,6 +740,7 @@ def web_state():
         'prompt': prompt_state is not None,
         'screen': [menu_item + 1, len(menu)],
         'connected': lcd.connection is not None,
+        'bays': bay_state(),
     }
 
 def web_press(name):
@@ -721,6 +801,7 @@ def main():
         web = WebPanel(*args.web, web_state, web_press)
         lcd.on_change = web_notify
         web.start()
+        threading.Thread(target=bay_loop, daemon=True).start()
     lcd_on()
     lcd.reset()
     lcd.clear()

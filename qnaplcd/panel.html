@@ -92,8 +92,23 @@
      line and Select beside the bottom one; LEDs underneath */
   .front { display: flex; align-items: center; gap: 18px; }
   .front .lcd { flex: 1; min-width: 0; }
-  .leds { display: flex; gap: 22px; margin-top: 18px; }
-  .led { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  /* indicator rows under the display: power strip and status LED, then
+     one light per drive bay */
+  .indicators {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 18px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255,255,255,.05);
+  }
+  .leds { display: flex; align-items: flex-end; gap: 22px; }
+  .led { display: flex; flex-direction: column; align-items: center; gap: 7px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .bays { display: flex; align-items: flex-end; gap: 10px; }
+  .bays .led { gap: 5px; letter-spacing: 0; }
+  .bays-label { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); align-self: flex-end; margin-right: 4px; }
   .lamp {
     width: 14px; height: 14px;
     border-radius: 50%;
@@ -110,6 +125,15 @@
     50%  { background: var(--green); box-shadow: 0 0 10px var(--green); }
   }
   .led.undriven .lamp { opacity: .55; }
+  /* power: a light strip rather than a dot */
+  .lamp.strip { width: 56px; height: 5px; border-radius: 3px; }
+  /* drive bay lights: green = disk present, flickering = I/O, red = error */
+  .lamp.bay { width: 22px; height: 5px; border-radius: 3px; }
+  .lamp.busy { animation: flicker .18s steps(1, end) infinite; }
+  @keyframes flicker {
+    0%  { background: var(--green); box-shadow: 0 0 10px var(--green); }
+    50% { background: var(--led-off); box-shadow: inset 0 1px 2px rgba(0,0,0,.6); }
+  }
 
   .buttons { display: flex; flex-direction: column; gap: 10px; }
   .button { display: flex; flex-direction: row-reverse; align-items: center; gap: 8px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
@@ -173,9 +197,12 @@
       </div>
     </div>
 
-    <div class="leds">
-      <div class="led"><span class="lamp green" id="power"></span>Power</div>
-      <div class="led" id="status-wrap"><span class="lamp" id="status"></span>Status</div>
+    <div class="indicators">
+      <div class="leds">
+        <div class="led"><span class="lamp strip green" id="power"></span>Power</div>
+        <div class="led" id="status-wrap"><span class="lamp" id="status"></span>Status</div>
+      </div>
+      <div class="bays" id="bays" hidden></div>
     </div>
   </div>
 
@@ -209,6 +236,26 @@ function render(s) {
   $('select').classList.toggle('down', s.buttons.select);
   $('screen').textContent = s.prompt ? 'Enter = yes, Select = no' : `screen ${s.screen[0]} of ${s.screen[1]}`;
   $('warn').textContent = s.connected ? '' : 'serial port not open';
+  renderBays(s.bays || []);
+}
+
+function renderBays(bays) {
+  const box = $('bays');
+  box.hidden = !bays.length;
+  if (box.querySelectorAll('.bay').length !== bays.length) {
+    box.innerHTML = '<span class="bays-label">Drives</span>';
+    bays.forEach((_, i) => {
+      const led = box.appendChild(document.createElement('div'));
+      led.className = 'led';
+      led.innerHTML = `<span class="lamp bay"></span>${i + 1}`;
+    });
+  }
+  const lamps = box.querySelectorAll('.bay');
+  bays.forEach((b, i) => {
+    const on = b.state === 'error' ? ' red' : b.state === 'ok' ? (b.busy ? ' busy' : ' green') : '';
+    lamps[i].className = 'lamp bay' + on;
+    lamps[i].parentNode.title = b.disk ? `bay ${i + 1}: ${b.disk}${b.state === 'error' ? ' (errors)' : ''}` : `bay ${i + 1}: empty`;
+  });
 }
 
 function setConn(cls, text) {

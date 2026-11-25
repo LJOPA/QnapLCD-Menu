@@ -33,6 +33,7 @@ class WebPanel:
         self.get_state = get_state
         self.press = press
         self.version = 0
+        self.clients = 0    # open event streams; nobody watching, no polling
         self.changed = threading.Condition()
         with open(PAGE, 'rb') as f:
             self.page = f.read()
@@ -86,6 +87,8 @@ class WebPanel:
                 self.send_header('Cache-Control', 'no-store')
                 self.end_headers()
                 seen = -1
+                with panel.changed:
+                    panel.clients += 1
                 try:
                     while True:
                         with panel.changed:
@@ -100,6 +103,9 @@ class WebPanel:
                         self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError, OSError):
                     pass  # the browser went away
+                finally:
+                    with panel.changed:
+                        panel.clients -= 1
 
         server_class = ThreadingHTTPServer
         if ':' in address:
