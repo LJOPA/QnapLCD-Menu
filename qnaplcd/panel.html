@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Front panel</title>
+<style>
+  :root {
+    --bg: #1b1d21;
+    --bezel: #2b2e33;
+    --bezel-edge: #3a3e44;
+    --text: #c9ccd1;
+    --muted: #7d828a;
+    --lcd-on: #2f6fd6;
+    --lcd-on-edge: #4f8ae8;
+    --lcd-off: #17233a;
+    --char-on: #eef4ff;
+    --char-off: #3b4a66;
+    --led-off: #23262a;
+    --green: #3ddc6a;
+    --red: #ff4a3d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  main { width: min(640px, 100%); }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 12px;
+    color: var(--muted);
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text); }
+  #conn::before {
+    content: "";
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    background: var(--muted);
+    vertical-align: 1px;
+  }
+  #conn.live::before { background: var(--green); }
+  #conn.down::before { background: var(--red); }
+
+  .panel {
+    background: linear-gradient(180deg, var(--bezel-edge), var(--bezel) 30%);
+    border: 1px solid #000;
+    border-radius: 14px;
+    padding: 22px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+  }
+
+  /* LCD: 2 rows x 16 character cells */
+  .lcd {
+    background: var(--lcd-off);
+    border: 3px solid #0b0d10;
+    border-radius: 6px;
+    padding: 12px 14px;
+    transition: background .25s, box-shadow .25s;
+  }
+  .lcd.lit {
+    background: radial-gradient(ellipse at center, var(--lcd-on-edge), var(--lcd-on) 75%);
+    box-shadow: 0 0 24px rgba(79,138,232,.35);
+  }
+  .lcd { container-type: inline-size; }
+  .row { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
+  .row + .row { margin-top: 5px; }
+  .cell {
+    aspect-ratio: 5 / 8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255,255,255,.05);
+    border-radius: 1px;
+    font: 600 clamp(8px, 5.2cqi, 24px)/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--char-off);
+    white-space: pre;
+  }
+  .lcd.lit .cell { color: var(--char-on); text-shadow: 0 0 4px rgba(238,244,255,.5); background: rgba(255,255,255,.07); }
+
+  /* as on the TS-x69: buttons right of the display, Enter beside the top
+     line and Select beside the bottom one; LEDs underneath */
+  .front { display: flex; align-items: center; gap: 18px; }
+  .front .lcd { flex: 1; min-width: 0; }
+  .leds { display: flex; gap: 22px; margin-top: 18px; }
+  .led { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lamp {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--led-off);
+    border: 1px solid #000;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.6);
+  }
+  .lamp.green { background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .lamp.red   { background: var(--red);   box-shadow: 0 0 10px var(--red); }
+  /* red on blinker 2 at ~1 Hz, green underneath: alternates */
+  .lamp.alternate { animation: red-green 1s steps(1, end) infinite; }
+  @keyframes red-green {
+    0%   { background: var(--red);   box-shadow: 0 0 10px var(--red); }
+    50%  { background: var(--green); box-shadow: 0 0 10px var(--green); }
+  }
+  .led.undriven .lamp { opacity: .55; }
+
+  .buttons { display: flex; flex-direction: column; gap: 10px; }
+  .button { display: flex; flex-direction: row-reverse; align-items: center; gap: 8px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .button button {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    border: 1px solid #000;
+    background: radial-gradient(circle at 40% 35%, #4a4f57, #2a2d32 70%);
+    box-shadow: 0 3px 0 #0b0c0e, 0 4px 10px rgba(0,0,0,.4);
+    cursor: pointer;
+    transition: transform .05s, box-shadow .05s;
+  }
+  .button button:hover { background: radial-gradient(circle at 40% 35%, #555b64, #2e3137 70%); }
+  .button button:focus-visible { outline: 2px solid var(--lcd-on-edge); outline-offset: 3px; }
+  .button button:active, .button button.down {
+    transform: translateY(3px);
+    box-shadow: 0 0 0 #0b0c0e, 0 1px 4px rgba(0,0,0,.4);
+  }
+  .button button:disabled { cursor: default; opacity: .5; }
+  @media (max-width: 480px) {
+    .panel { padding: 14px; }
+    .front { gap: 12px; }
+    .button span { display: none; }  /* Enter is the top button, Select the bottom */
+  }
+
+  footer {
+    margin-top: 14px;
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: 12px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  kbd {
+    font: 11px ui-monospace, Menlo, monospace;
+    border: 1px solid var(--bezel-edge);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+  #warn { color: var(--red); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="host">Front panel</h1>
+    <span id="conn">connecting</span>
+  </header>
+
+  <div class="panel">
+    <div class="front">
+      <div class="lcd" id="lcd" aria-live="polite">
+        <div class="row" id="row0"></div>
+        <div class="row" id="row1"></div>
+      </div>
+      <div class="buttons">
+        <div class="button"><button id="enter" aria-label="Enter"></button><span>Enter</span></div>
+        <div class="button"><button id="select" aria-label="Select"></button><span>Select</span></div>
+      </div>
+    </div>
+
+    <div class="leds">
+      <div class="led"><span class="lamp green" id="power"></span>Power</div>
+      <div class="led" id="status-wrap"><span class="lamp" id="status"></span>Status</div>
+    </div>
+  </div>
+
+  <footer>
+    <span><kbd>Enter</kbd> Enter &nbsp; <kbd>Space</kbd> Select</span>
+    <span id="screen"></span>
+    <span id="warn"></span>
+  </footer>
+</main>
+
+<script>
+const COLS = 16;
+const $ = id => document.getElementById(id);
+const rows = [$('row0'), $('row1')];
+
+for (const row of rows)
+  for (let i = 0; i < COLS; i++) row.appendChild(document.createElement('span')).className = 'cell';
+
+function render(s) {
+  document.title = `${s.host} - front panel`;
+  $('host').textContent = s.host;
+  $('lcd').classList.toggle('lit', s.backlight);
+  s.lines.forEach((text, r) => {
+    const cells = rows[r].children;
+    for (let i = 0; i < COLS; i++) cells[i].textContent = text[i] || ' ';
+  });
+  $('status').className = 'lamp' + (s.status_led ? ' ' + s.status_led : '');
+  $('status-wrap').classList.toggle('undriven', !s.status_led_driven);
+  $('status-wrap').title = s.status_led_driven ? '' : 'not driven on this machine (no qnapled or --no-status-led)';
+  $('enter').classList.toggle('down', s.buttons.enter);
+  $('select').classList.toggle('down', s.buttons.select);
+  $('screen').textContent = s.prompt ? 'Enter = yes, Select = no' : `screen ${s.screen[0]} of ${s.screen[1]}`;
+  $('warn').textContent = s.connected ? '' : 'serial port not open';
+}
+
+function setConn(cls, text) {
+  $('conn').className = cls;
+  $('conn').textContent = text;
+  for (const b of ['enter', 'select']) $(b).disabled = cls !== 'live';
+}
+
+function connect() {
+  const es = new EventSource('api/events');
+  es.onopen = () => setConn('live', 'live');
+  es.onmessage = e => render(JSON.parse(e.data));
+  es.onerror = () => setConn('down', 'reconnecting');  // EventSource retries by itself
+}
+
+async function press(name) {
+  try {
+    const r = await fetch('api/button/' + name, { method: 'POST', headers: { 'X-QnapLCD': '1' } });
+    if (!r.ok) throw new Error(r.status);
+  } catch (e) {
+    $('warn').textContent = `${name} failed: ${e.message}`;
+  }
+}
+
+$('enter').addEventListener('click', () => press('enter'));
+$('select').addEventListener('click', () => press('select'));
+document.addEventListener('keydown', e => {
+  if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'Enter') { e.preventDefault(); press('enter'); }
+  else if (e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); press('select'); }
+});
+
+connect();
+</script>
+</body>
+</html>

@@ -328,12 +328,15 @@ def show_notice():
     mark = '!' if level == 'error' else '~'
     show(f'{mark}{line1}', line2)
 
-status_led = None
+status_led = None   # what the status LED should show, driven or not
 def set_status_led(colour):
     global status_led
-    if colour == status_led or args.no_status_led or not os.access(QNAPLED, os.X_OK):
+    if colour == status_led:
         return
     status_led = colour
+    web_notify()
+    if args.no_status_led or not os.access(QNAPLED, os.X_OK):
+        return
     subprocess.run([QNAPLED, 'status-led', colour], stdout=subprocess.DEVNULL)
 
 #
@@ -585,6 +588,7 @@ def answer(yes):
 ENTER = 0x01
 SELECT = 0x02
 held = 0
+buttons_down = 0    # as last reported by the panel, for the web view
 
 def select_pressed():
     global menu_item
@@ -613,13 +617,15 @@ def response_handler(command, data):
         print(f'button handling failed: {e!r}', file=sys.stderr)
 
 def handle_buttons(command, data):
-    global held
+    global held, buttons_down
 
     if command != 'Switch_Status':
         return
 
     with ui_lock:
         lcd_on()
+        buttons_down = data & 0x03
+        web_notify()
         if data & 0x03:
             held |= data & 0x03
             return
@@ -630,13 +636,58 @@ def handle_buttons(command, data):
         elif pressed == SELECT:
             select_pressed()
 
+#
+# Web panel (--web): a live copy of the display, LEDs and buttons in a
+# browser. The display comes from what QnapLCD last sent to the panel.
+#
+web = None
+
+def web_notify():
+    if web:
+        web.notify()
+
+def web_state():
+    # no ui_lock: this runs on the web server's threads and only reads
+    with lcd.state_lock:
+        lines = list(lcd.shown)
+    return {
+        'host': platform.node().split('.')[0],
+        'lines': lines,
+        'backlight': lcd.lit,
+        'status_led': status_led,
+        'status_led_driven': not args.no_status_led and os.access(QNAPLED, os.X_OK),
+        'buttons': {'enter': bool(buttons_down & ENTER),
+                    'select': bool(buttons_down & SELECT)},
+        'prompt': prompt_state is not None,
+        'screen': [menu_item + 1, len(menu)],
+        'connected': lcd.connection is not None,
+    }
+
+def web_press(name):
+    # the same path as the real buttons: press, then release
+    bit = ENTER if name == 'enter' else SELECT
+    with ui_lock:
+        handle_buttons('Switch_Status', bit)
+        handle_buttons('Switch_Status', 0x00)
+
+def parse_listen(value):
+    """'8080', '127.0.0.1:8080' or '[::]:8080' -> (address, port)."""
+    addr, sep, port = value.rpartition(':')
+    if not sep:
+        addr = '0.0.0.0'
+    addr = addr.strip('[]') or '0.0.0.0'
+    try:
+        port = int(port)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'not [ADDRESS:]PORT: {value}')
+    return addr, port
 
 def handle_sigterm(signum, frame):
     # rc.d stop (via daemon(8)) sends SIGTERM; unwind through main()'s finally
     sys.exit(0)
 
 def main():
-    global lcd, args
+    global lcd, args, web
 
     parser = argparse.ArgumentParser(description='QNAP front-panel LCD menu')
     parser.add_argument('--port', default=PORT, help=f'serial device (default {PORT})')
@@ -644,6 +695,9 @@ def main():
     parser.add_argument('--refresh', type=int, default=30, help='seconds between interface/pool rescans (default 30)')
     parser.add_argument('--no-status-led', action='store_true', help='leave the status LED alone')
     parser.add_argument('--no-updates', action='store_true', help='do not check for or offer updates')
+    parser.add_argument('--web', metavar='[ADDRESS:]PORT', type=parse_listen,
+                        help='serve a live web view of the panel (no authentication: '
+                             'anyone who can reach it can press the buttons)')
     args = parser.parse_args()
 
     signal.signal(signal.SIGTERM, handle_sigterm)
@@ -662,6 +716,11 @@ def main():
     threading.Thread(target=scroll_loop, daemon=True).start()
 
     lcd = qnaplcd.QnapLCD(args.port, args.speed, response_handler)
+    if args.web:
+        from qnaplcd.web import WebPanel
+        web = WebPanel(*args.web, web_state, web_press)
+        lcd.on_change = web_notify
+        web.start()
     lcd_on()
     lcd.reset()
     lcd.clear()

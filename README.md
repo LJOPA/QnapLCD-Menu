@@ -24,7 +24,8 @@ at the end for reference.
   per network interface and one per ZFS pool. Select moves to the next
   screen; Enter runs the screen's action, where it has one (Updates). Lines
   too long for the 16-column display scroll. The backlight turns off after
-  30 seconds without a button press.
+  30 seconds without a button press. Optionally it serves a web page showing
+  the display, LEDs and buttons (see "Web panel" below).
 - `preinit.py`, `postinit.py`, `shutdown.py`: short scripts that print a status
   message on the display and exit.
 - `qnaplcd/`: a Python module for the A125 display. It uses pyserial and a
@@ -91,6 +92,28 @@ Optional `rc.conf` settings:
 - `qnaplcd_logfile`: log file (default `/var/log/qnaplcd.log`)
 - `qnaplcd_power_led`: make the power LED steady when the service starts
   (default `YES`)
+- `qnaplcd_web`: serve the web panel on `[ADDRESS:]PORT`, for example `8080`
+  or `192.168.1.10:8080` (default: off)
+
+### Web panel
+
+With `qnaplcd_web` set (or `--web` on the command line), the menu serves a
+page that shows the display, the power and status LEDs and the two buttons,
+and updates as they change. Clicking a button (or pressing Space for Select,
+Enter for Enter) works exactly like pressing the real one, including turning
+the backlight on.
+
+```
+sysrc qnaplcd_web=8080
+service qnaplcd restart
+```
+
+Then open `http://<nas>:8080/`. The page needs no internet access.
+
+**There is no login.** Anyone who can reach the port can use the buttons,
+which includes installing updates and rebooting. Bind it to an address only
+trusted machines can reach (`127.0.0.1:8080` plus an SSH tunnel, or a
+management network), or put it behind a reverse proxy with authentication.
 
 ### Notices
 

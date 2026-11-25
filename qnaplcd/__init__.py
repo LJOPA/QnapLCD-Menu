@@ -26,6 +26,13 @@ class QnapLCD:
         self.lines = 2
         self.columns = 16
 
+        # a copy of what the panel shows, for the web view; on_change (if
+        # set) is called after every change, from whichever thread wrote
+        self.shown = [' ' * self.columns, ' ' * self.columns]
+        self.lit = False
+        self.on_change = None
+        self.state_lock = Lock()
+
         try:
             self.connection = serial.Serial(self.port, self.speed, timeout=None)
         except serial.SerialException as se:
@@ -80,7 +87,13 @@ class QnapLCD:
                     nack_cmd = self._read_bytes()
                     self.handler('Nack', nack_cmd)
 
+    def _changed(self):
+        if self.on_change:
+            self.on_change()
+
     def backlight(self, on=True):
+        self.lit = bool(on)
+        self._changed()
         if self.connection:
             if on:
                 self.connection.write(bytes([0x4d, 0x5e, 0x01]))
@@ -88,10 +101,16 @@ class QnapLCD:
                 self.connection.write(bytes([0x4d, 0x5e, 0x00]))
 
     def clear(self):
+        with self.state_lock:
+            self.shown = [' ' * self.columns, ' ' * self.columns]
+        self._changed()
         if self.connection:
             self.connection.write(bytes([0x4d, 0x0d]))
 
     def reset(self):
+        with self.state_lock:
+            self.shown = [' ' * self.columns, ' ' * self.columns]
+        self._changed()
         if self.connection:
             self.connection.write(bytes([0x4d, 0xff]))
 
@@ -118,6 +137,10 @@ class QnapLCD:
             msg = msg[:self.columns]
             line %= 2
             line = 0x00 if line else 0x01
+            # the panel overwrites the start of the row and keeps the rest
+            with self.state_lock:
+                self.shown[line] = msg + self.shown[line][len(msg):]
+            self._changed()
             if self.connection:
                 self.connection.write(bytes([0x4d, 0x0c, line, len(msg)]))
                 self.connection.write(msg.encode('utf-8'))
