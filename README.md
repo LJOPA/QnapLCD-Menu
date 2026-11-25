@@ -103,7 +103,7 @@ drive bay and the two buttons, and updates as they change. A bay light is
 green when a disk is in the bay, flickers while the disk is busy (checked
 once a second while the page is open) and turns red when a notice reports
 errors for that disk. Bays 1-6 are taken to be AHCI channels 0-5 (the TS-x69's
-three Marvell controllers); this order has not been checked against the trays. Clicking a button (or pressing Space for Select,
+three Marvell controllers), checked on a TS-669. Clicking a button (or pressing Space for Select,
 Enter for Enter) works exactly like pressing the real one, including turning
 the backlight on.
 
