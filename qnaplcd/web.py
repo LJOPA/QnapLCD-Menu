@@ -6,13 +6,15 @@
 #   GET  /                 the panel page (panel.html next to this file)
 #   GET  /api/state        current state as JSON
 #   GET  /api/events       text/event-stream, one `data:` per change
-#   POST /api/button/NAME  press and release enter | select
+#   POST /api/button/NAME  press and release enter | select (403 if refused)
 #
 # Button presses need an `X-QnapLCD: 1` header. A browser only sends a
 # custom header cross-origin after a CORS preflight, which this server never
 # answers, so another web page can't press buttons for you. It is not
-# authentication: anyone who can reach the port can use the panel, reboot
-# and update prompts included. Bind it to a trusted address.
+# authentication: anyone who can reach the port can use the panel. press()
+# may refuse a button by raising PermissionError (answered 403): lcd-menu.py
+# lets the web only move around the menus, so updates, scrubs and reboots
+# need the real buttons. Still, bind it to a trusted address.
 #
 import json
 import os
@@ -77,6 +79,9 @@ class WebPanel:
                 else:
                     try:
                         panel.press(name)
+                    except PermissionError as e:
+                        self.send(403, json.dumps({'error': str(e)}).encode('utf-8'))
+                        return
                     except Exception as e:
                         print(f'web button {name} failed: {e!r}', file=sys.stderr)
                         self.send(500, b'{"error": "button handling failed"}')
