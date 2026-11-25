@@ -187,11 +187,14 @@ def find_ips():
                     interfaces[member]['is_member'] = True
 
     found = []
+    active = []     # ports with a link, for the web panel's LAN light
     for name in order:
         if name == 'lo0':
             continue
 
         iface = interfaces[name]
+        if iface['status'] == 'active':
+            active.append(name)
 
         # lagg (FreeBSD bonding) members carry no IP of their own -
         # show link status instead, matching a Linux bond slave.
@@ -199,10 +202,6 @@ def find_ips():
             found.append((name, iface['status']))
         else:
             found.append((name, iface['addr'] or '0.0.0.0'))
-
-    # ports with a link, for the web panel's LAN light
-    active = [name for name in order
-              if name != 'lo0' and interfaces[name]['status'] == 'active']
     return found, active
 
 def show_ip():
@@ -224,13 +223,16 @@ def show_zpool():
     show(f'{pool[0]} ({pool[7]})', f'{pool[2]} of {pool[1]}')
 
 #
-# Notices: things worth a look, each ('error' | 'maint', line1, line2).
+# Notices: things worth a look, each ('error' | 'maint', line1, line2, disk);
+# disk is the adaN a notice is about (for the web panel's bays), else None.
 # Errors turn the status LED red and pop up on the display; maintenance
 # (scrub, resilver) makes it alternate red/green.
 #
 notices = []
 zfs_labels = {}     # disk -> (pool, name in zpool status), for the web panel
 smart_notices = []
+
+DISK_RE = re.compile(r'(ada|da)\d+')   # whole-disk device names
 
 def disk_names():
     """diskid/DISK-XXXX (and other labels) -> adaN, from `glabel status`."""
@@ -259,14 +261,14 @@ def pool_notices():
 
         state = re.search(r'^\s*state: (\S+)', block, re.M)
         if state and state.group(1) != 'ONLINE':
-            found.append(('error', f'{pool} {state.group(1)}', 'see zpool status'))
+            found.append(('error', f'{pool} {state.group(1)}', 'see zpool status', None))
 
         scan = re.search(r'(scrub|resilver) in progress', block)
         if scan:
             done = re.search(r'([\d.]+)% done', block)
             what = 'scrubbing' if scan.group(1) == 'scrub' else 'resilvering'
             pct = f'{float(done.group(1)):.0f}% done - ' if done else ''
-            found.append(('maint', f'{pool} {what}', f'{pct}disks may be slow'))
+            found.append(('maint', f'{pool} {what}', f'{pct}disks may be slow', None))
 
         # vdev rows under "config:": NAME STATE READ WRITE CKSUM
         config = block.split('config:', 1)[-1].split('errors:', 1)[0]
@@ -277,19 +279,19 @@ def pool_notices():
             # ada0, diskid/DISK-XXXX, gpt/label: which adaN it is, for the
             # web panel's bay labels (raidz/mirror rows aren't disks)
             disk = names.get(cols[0], cols[0].split('/')[-1])
-            if re.fullmatch(r'(ada|da)\d+', disk):
+            if DISK_RE.fullmatch(disk):
                 labels[disk] = (pool, cols[0])
             read, write, cksum = cols[2:5]
             if not all(re.fullmatch(r'[\d.]+[KMGT]?', c) for c in (read, write, cksum)):
                 continue
             if (read, write, cksum) != ('0', '0', '0'):
                 found.append(('error', f'{disk} errors',
-                              f'read {read} write {write} checksum {cksum}'))
+                              f'read {read} write {write} checksum {cksum}', disk))
 
         errors = re.search(r'^errors: (\d+) data errors', block, re.M)
         if errors:
             found.append(('error', f'{pool} data errors',
-                          f'{errors.group(1)} - see zpool status -v'))
+                          f'{errors.group(1)} - see zpool status -v', None))
     return found, labels
 
 def check_smart():
@@ -306,7 +308,7 @@ def check_smart():
         health = re.search(r'self-assessment test result: (\S+)|'
                            r'SMART Health Status: (\S+)', out)
         if health and (health.group(1) or health.group(2)) not in ('PASSED', 'OK'):
-            found.append(('error', f'{disk} SMART', 'health check FAILED'))
+            found.append(('error', f'{disk} SMART', 'health check FAILED', disk))
             continue
         # attribute table: ID NAME FLAG VALUE WORST THRESH TYPE UPDATED WHEN_FAILED RAW
         raw = {}
@@ -320,7 +322,7 @@ def check_smart():
                if raw.get(attr, 0) > 0]
         if bad:
             found.append(('error', f'{disk} SMART',
-                          'sectors: ' + ', '.join(bad)))
+                          'sectors: ' + ', '.join(bad), disk))
     with ui_lock:
         smart_notices[:] = found
 
@@ -337,18 +339,22 @@ def show_notice():
         show('Notices', 'none')
         return
     index = nth(show_notice)
-    level, line1, line2 = notices[index]
+    level, line1, line2, _ = notices[index]
     mark = '!' if level == 'error' else '~'
     show(f'{mark}{line1}', line2)
 
 status_led = None   # what the status LED should show, driven or not
+
+def status_led_driven():
+    return not args.no_status_led and os.access(QNAPLED, os.X_OK)
+
 def set_status_led(colour):
     global status_led
     if colour == status_led:
         return
     status_led = colour
     web_notify()
-    if args.no_status_led or not os.access(QNAPLED, os.X_OK):
+    if not status_led_driven():
         return
     subprocess.run([QNAPLED, 'status-led', colour], stdout=subprocess.DEVNULL)
 
@@ -640,8 +646,9 @@ def handle_buttons(command, data):
 
     with ui_lock:
         lcd_on()
-        buttons_down = data & 0x03
-        web_notify()
+        if buttons_down != data & 0x03:
+            buttons_down = data & 0x03
+            web_notify()
         if data & 0x03:
             held |= data & 0x03
             return
@@ -657,6 +664,7 @@ def handle_buttons(command, data):
 # browser. The display comes from what QnapLCD last sent to the panel.
 #
 web = None
+HOST = platform.node().split('.')[0]
 
 def web_notify():
     if web:
@@ -683,7 +691,7 @@ def find_bay_disks():
             continue
         match = re.search(r'\(([^)]*)\)\s*$', line)
         if match and channel:
-            disks = [d for d in match.group(1).split(',') if re.fullmatch(r'(ada|da)\d+', d)]
+            disks = [d for d in match.group(1).split(',') if DISK_RE.fullmatch(d)]
             if disks:
                 by_channel[channel] = disks[0]
     return [by_channel.get(ch) for ch in BAY_CHANNELS]
@@ -775,7 +783,7 @@ def activity_loop():
             web_notify()
 
 def bay_state():
-    errors = {n[1].split()[0] for n in notices if n[0] == 'error'}
+    errors = {n[3] for n in notices if n[0] == 'error'}
     return [{'disk': disk,
              'state': 'empty' if not disk else 'error' if disk in errors else 'ok',
              'busy': disk in disk_busy,
@@ -787,18 +795,18 @@ def web_state():
     with lcd.state_lock:
         lines = list(lcd.shown)
     return {
-        'host': platform.node().split('.')[0],
+        'host': HOST,
         'lines': lines,
         'backlight': lcd.lit,
         'status_led': status_led,
-        'status_led_driven': not args.no_status_led and os.access(QNAPLED, os.X_OK),
+        'status_led_driven': status_led_driven(),
         'buttons': {'enter': bool(buttons_down & ENTER),
                     'select': bool(buttons_down & SELECT)},
         'prompt': prompt_state is not None,
         'screen': [menu_item + 1, len(menu)],
         'connected': lcd.connection is not None,
         'bays': bay_state(),
-        'lan': 'busy' if lan_busy and lan_links else 'on' if lan_links else 'off',
+        'lan': 'busy' if lan_busy else 'on' if lan_links else 'off',
     }
 
 def web_press(name):
@@ -810,9 +818,7 @@ def web_press(name):
 
 def parse_listen(value):
     """'8080', '127.0.0.1:8080' or '[::]:8080' -> (address, port)."""
-    addr, sep, port = value.rpartition(':')
-    if not sep:
-        addr = '0.0.0.0'
+    addr, _, port = value.rpartition(':')
     addr = addr.strip('[]') or '0.0.0.0'
     try:
         port = int(port)

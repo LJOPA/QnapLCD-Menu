@@ -20,6 +20,7 @@ import socket
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'panel.html')
 KEEPALIVE = 15  # seconds between SSE comments on an idle stream
@@ -33,6 +34,7 @@ class WebPanel:
         self.get_state = get_state
         self.press = press
         self.version = 0
+        self.cached = (-1, b'')   # (version, state JSON): built once per change
         self.clients = 0    # open event streams; nobody watching, no polling
         self.changed = threading.Condition()
         with open(PAGE, 'rb') as f:
@@ -55,7 +57,7 @@ class WebPanel:
                 self.wfile.write(body)
 
             def do_GET(self):
-                path = self.path.split('?', 1)[0]
+                path = urlsplit(self.path).path
                 if path in ('/', '/index.html'):
                     self.send(200, panel.page, 'text/html; charset=utf-8')
                 elif path == '/api/state':
@@ -66,7 +68,7 @@ class WebPanel:
                     self.send(404, b'{"error": "not found"}')
 
             def do_POST(self):
-                path = self.path.split('?', 1)[0]
+                path = urlsplit(self.path).path
                 name = path[len('/api/button/'):] if path.startswith('/api/button/') else None
                 if name not in ('enter', 'select'):
                     self.send(404, b'{"error": "not found"}')
@@ -115,7 +117,11 @@ class WebPanel:
         self.server.daemon_threads = True
 
     def state_json(self):
-        return json.dumps(self.get_state()).encode('utf-8')
+        # every open page wants the same state after a change; build it once
+        with self.changed:
+            if self.cached[0] != self.version:
+                self.cached = (self.version, json.dumps(self.get_state()).encode('utf-8'))
+            return self.cached[1]
 
     def notify(self):
         with self.changed:
