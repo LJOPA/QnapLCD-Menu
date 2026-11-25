@@ -20,6 +20,11 @@
 # qnaplcd_power_led (bool): Make the power LED steady instead of blinking
 #                          (TS-x69 / IT8721F only; a no-op elsewhere).
 #                          Default: "YES"
+# qnaplcd_web (str):       Serve a live web view of the panel (display, LEDs,
+#                          buttons) on "[ADDRESS:]PORT", e.g. "8080" or
+#                          "192.168.1.10:8080". No authentication: anyone who
+#                          can reach it can press the buttons.
+#                          Default: "" (off)
 
 . /etc/rc.subr
 
@@ -34,6 +39,7 @@ load_rc_config $name
 : ${qnaplcd_logfile:="/var/log/qnaplcd.log"}
 : ${qnaplcd_home:="%%PREFIX%%/libexec/qnaplcd"}
 : ${qnaplcd_power_led:="YES"}
+: ${qnaplcd_web:=""}
 
 pidfile="/var/run/${name}.pid"
 command="/usr/sbin/daemon"
@@ -42,7 +48,7 @@ command="/usr/sbin/daemon"
 # -f: detach from the caller's stdio (otherwise `service start` over ssh,
 #     or the boot console, stays attached); output still goes to -o.
 command_args="-P ${pidfile} -f -r -t ${name} -o ${qnaplcd_logfile} \
-    ${qnaplcd_python} -u ${qnaplcd_home}/lcd-menu.py --port ${qnaplcd_port} ${qnaplcd_flags}"
+    ${qnaplcd_python} -u ${qnaplcd_home}/lcd-menu.py --port ${qnaplcd_port} ${qnaplcd_web:+--web ${qnaplcd_web}} ${qnaplcd_flags}"
 
 # rc.subr would put ${name}_flags before command_args, i.e. on daemon(8)'s
 # command line; they are already passed to lcd-menu.py above.

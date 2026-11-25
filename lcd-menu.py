@@ -187,11 +187,14 @@ def find_ips():
                     interfaces[member]['is_member'] = True
 
     found = []
+    active = []     # ports with a link, for the web panel's LAN light
     for name in order:
         if name == 'lo0':
             continue
 
         iface = interfaces[name]
+        if iface['status'] == 'active':
+            active.append(name)
 
         # lagg (FreeBSD bonding) members carry no IP of their own -
         # show link status instead, matching a Linux bond slave.
@@ -199,11 +202,13 @@ def find_ips():
             found.append((name, iface['status']))
         else:
             found.append((name, iface['addr'] or '0.0.0.0'))
-    return found
+    return found, active
 
 def show_ip():
     name, addr = ip_addresses[nth(show_ip)]
     show(name, addr)
+
+lan_links = []      # interfaces with link (ifconfig "status: active")
 
 #
 # ZFS pools
@@ -218,12 +223,16 @@ def show_zpool():
     show(f'{pool[0]} ({pool[7]})', f'{pool[2]} of {pool[1]}')
 
 #
-# Notices: things worth a look, each ('error' | 'maint', line1, line2).
+# Notices: things worth a look, each ('error' | 'maint', line1, line2, disk);
+# disk is the adaN a notice is about (for the web panel's bays), else None.
 # Errors turn the status LED red and pop up on the display; maintenance
 # (scrub, resilver) makes it alternate red/green.
 #
 notices = []
+zfs_labels = {}     # disk -> (pool, name in zpool status), for the web panel
 smart_notices = []
+
+DISK_RE = re.compile(r'(ada|da)\d+')   # whole-disk device names
 
 def disk_names():
     """diskid/DISK-XXXX (and other labels) -> adaN, from `glabel status`."""
@@ -238,7 +247,9 @@ def disk_names():
     return names
 
 def pool_notices():
+    """-> (notices, {disk: (pool, name ZFS knows it by)}), from `zpool status`."""
     found = []
+    labels = {}
     output = shell('zpool status')
     names = disk_names()
 
@@ -250,14 +261,14 @@ def pool_notices():
 
         state = re.search(r'^\s*state: (\S+)', block, re.M)
         if state and state.group(1) != 'ONLINE':
-            found.append(('error', f'{pool} {state.group(1)}', 'see zpool status'))
+            found.append(('error', f'{pool} {state.group(1)}', 'see zpool status', None))
 
         scan = re.search(r'(scrub|resilver) in progress', block)
         if scan:
             done = re.search(r'([\d.]+)% done', block)
             what = 'scrubbing' if scan.group(1) == 'scrub' else 'resilvering'
             pct = f'{float(done.group(1)):.0f}% done - ' if done else ''
-            found.append(('maint', f'{pool} {what}', f'{pct}disks may be slow'))
+            found.append(('maint', f'{pool} {what}', f'{pct}disks may be slow', None))
 
         # vdev rows under "config:": NAME STATE READ WRITE CKSUM
         config = block.split('config:', 1)[-1].split('errors:', 1)[0]
@@ -265,19 +276,23 @@ def pool_notices():
             cols = line.split()
             if len(cols) < 5 or cols[0] in ('NAME', pool):
                 continue
+            # ada0, diskid/DISK-XXXX, gpt/label: which adaN it is, for the
+            # web panel's bay labels (raidz/mirror rows aren't disks)
+            disk = names.get(cols[0], cols[0].split('/')[-1])
+            if DISK_RE.fullmatch(disk):
+                labels[disk] = (pool, cols[0])
             read, write, cksum = cols[2:5]
             if not all(re.fullmatch(r'[\d.]+[KMGT]?', c) for c in (read, write, cksum)):
                 continue
             if (read, write, cksum) != ('0', '0', '0'):
-                disk = names.get(cols[0], cols[0].split('/')[-1])
                 found.append(('error', f'{disk} errors',
-                              f'read {read} write {write} checksum {cksum}'))
+                              f'read {read} write {write} checksum {cksum}', disk))
 
         errors = re.search(r'^errors: (\d+) data errors', block, re.M)
         if errors:
             found.append(('error', f'{pool} data errors',
-                          f'{errors.group(1)} - see zpool status -v'))
-    return found
+                          f'{errors.group(1)} - see zpool status -v', None))
+    return found, labels
 
 def check_smart():
     """One pass over every disk with smartctl; results go to smart_notices."""
@@ -293,7 +308,7 @@ def check_smart():
         health = re.search(r'self-assessment test result: (\S+)|'
                            r'SMART Health Status: (\S+)', out)
         if health and (health.group(1) or health.group(2)) not in ('PASSED', 'OK'):
-            found.append(('error', f'{disk} SMART', 'health check FAILED'))
+            found.append(('error', f'{disk} SMART', 'health check FAILED', disk))
             continue
         # attribute table: ID NAME FLAG VALUE WORST THRESH TYPE UPDATED WHEN_FAILED RAW
         raw = {}
@@ -307,7 +322,7 @@ def check_smart():
                if raw.get(attr, 0) > 0]
         if bad:
             found.append(('error', f'{disk} SMART',
-                          'sectors: ' + ', '.join(bad)))
+                          'sectors: ' + ', '.join(bad), disk))
     with ui_lock:
         smart_notices[:] = found
 
@@ -324,16 +339,23 @@ def show_notice():
         show('Notices', 'none')
         return
     index = nth(show_notice)
-    level, line1, line2 = notices[index]
+    level, line1, line2, _ = notices[index]
     mark = '!' if level == 'error' else '~'
     show(f'{mark}{line1}', line2)
 
-status_led = None
+status_led = None   # what the status LED should show, driven or not
+
+def status_led_driven():
+    return not args.no_status_led and os.access(QNAPLED, os.X_OK)
+
 def set_status_led(colour):
     global status_led
-    if colour == status_led or args.no_status_led or not os.access(QNAPLED, os.X_OK):
+    if colour == status_led:
         return
     status_led = colour
+    web_notify()
+    if not status_led_driven():
+        return
     subprocess.run([QNAPLED, 'status-led', colour], stdout=subprocess.DEVNULL)
 
 #
@@ -492,16 +514,19 @@ def redraw_if(func):
         func()
 
 def refresh():
-    global menu_item
-    ips = find_ips()
+    global menu_item, zfs_labels
+    ips, links = find_ips()
     pools = find_zpools()
-    found = pool_notices()
+    found, labels = pool_notices()
     with ui_lock:
         old_errors = {n for n in notices if n[0] == 'error'}
         ip_addresses[:] = ips
+        lan_links[:] = links
         zfs_pools[:] = pools
         notices[:] = found + smart_notices
+        zfs_labels = labels     # replaced whole: web threads read it unlocked
         rebuild_menu()
+        web_notify()
 
         if any(n[0] == 'error' for n in notices):
             set_status_led('red')
@@ -585,6 +610,7 @@ def answer(yes):
 ENTER = 0x01
 SELECT = 0x02
 held = 0
+buttons_down = 0    # as last reported by the panel, for the web view
 
 def select_pressed():
     global menu_item
@@ -613,13 +639,16 @@ def response_handler(command, data):
         print(f'button handling failed: {e!r}', file=sys.stderr)
 
 def handle_buttons(command, data):
-    global held
+    global held, buttons_down
 
     if command != 'Switch_Status':
         return
 
     with ui_lock:
         lcd_on()
+        if buttons_down != data & 0x03:
+            buttons_down = data & 0x03
+            web_notify()
         if data & 0x03:
             held |= data & 0x03
             return
@@ -630,13 +659,179 @@ def handle_buttons(command, data):
         elif pressed == SELECT:
             select_pressed()
 
+#
+# Web panel (--web): a live copy of the display, LEDs and buttons in a
+# browser. The display comes from what QnapLCD last sent to the panel.
+#
+web = None
+HOST = platform.node().split('.')[0]
+
+def web_notify():
+    if web:
+        web.notify()
+
+# Drive bays, left to right, by the AHCI channel behind each. On the TS-x69
+# the six bays hang off three Marvell 88SE9125s, two ports each, which
+# FreeBSD numbers ahcich0-5; the onboard Intel ports (ahcich6+) are internal.
+# Checked on a TS-669: ada0-ada5 (ahcich0-5) light bays 1-6, left to right.
+BAY_CHANNELS = ['ahcich0', 'ahcich1', 'ahcich2', 'ahcich3', 'ahcich4', 'ahcich5']
+BAY_RESCAN = 30         # seconds between looks for added/removed disks
+bay_disks = [None] * len(BAY_CHANNELS)   # adaN in each bay, None if empty
+disk_busy = set()       # disks with I/O in the last second
+
+def find_bay_disks():
+    """Bay -> disk from `camcontrol devlist -v` (needs root):
+         scbus0 on ahcich0 bus 0:
+         <ST2000DL003-9VT166 CC32>  at scbus0 target 0 lun 0 (pass0,ada0)"""
+    by_channel, channel = {}, None
+    for line in shell('camcontrol devlist -v').split('\n'):
+        match = re.match(r'scbus\d+ on (\S+) bus', line)
+        if match:
+            channel = match.group(1)
+            continue
+        match = re.search(r'\(([^)]*)\)\s*$', line)
+        if match and channel:
+            disks = [d for d in match.group(1).split(',') if DISK_RE.fullmatch(d)]
+            if disks:
+                by_channel[channel] = disks[0]
+    return [by_channel.get(ch) for ch in BAY_CHANNELS]
+
+LAN_BUSY = 4096         # bytes/s before the LAN light flickers; the page's
+                        # own updates are well under this
+lan_busy = False
+
+def interface_bytes(netstat):
+    """`netstat -ibn -f link` -> {interface: in + out bytes}.
+         Name Mtu Network Address Ipkts Ierrs Idrop Ibytes Opkts Oerrs Obytes Coll"""
+    lines = netstat.split('\n')
+    head = lines[0].split() if lines else []
+    if 'Ibytes' not in head or 'Obytes' not in head:
+        return {}
+    ib, ob = head.index('Ibytes'), head.index('Obytes')
+    counts = {}
+    for line in lines[1:]:
+        cols = line.split()
+        if len(cols) == len(head) and cols[ib].isdigit() and cols[ob].isdigit():
+            counts[cols[0]] = int(cols[ib]) + int(cols[ob])
+    return counts
+
+def activity_loop():
+    """While someone has the web panel open: which disk is in each bay
+    (every BAY_RESCAN s), and once a second which disks and whether the LAN
+    are busy. One shell per second runs `netstat` and `iostat` together.
+    Nothing runs while no page is open."""
+    global lan_busy
+    last_scan = 0
+    last_bytes, last_time = None, None
+    while True:
+        if not web.clients:
+            # idle: forget what was seen, so the next page starts fresh
+            last_scan, last_bytes = 0, None
+            if disk_busy or lan_busy:
+                disk_busy.clear()
+                lan_busy = False
+                web_notify()
+            time.sleep(1)
+            continue
+
+        if time.time() - last_scan > BAY_RESCAN:
+            last_scan = time.time()
+            try:
+                found = find_bay_disks()
+            except (subprocess.CalledProcessError, OSError) as e:
+                print(f'bay scan failed: {e}', file=sys.stderr)
+                found = bay_disks
+            if found != bay_disks:
+                bay_disks[:] = found
+                web_notify()
+
+        disks = [d for d in bay_disks if d]
+        # two iostat reports: since boot, then the last second; the last wins.
+        # Without disks, sleep 1 keeps the pace.
+        disk_cmd = f'iostat -x -d -c 2 -w 1 {" ".join(disks)}' if disks else 'sleep 1'
+        try:
+            out = shell(f'netstat -ibn -f link; echo ---; {disk_cmd}')
+        except (subprocess.CalledProcessError, OSError) as e:
+            print(f'activity check failed: {e}', file=sys.stderr)
+            time.sleep(BAY_RESCAN)
+            continue
+        now_time = time.time()
+        net_out, _, disk_out = out.partition('\n---\n')
+
+        rate = {}
+        for line in disk_out.split('\n'):
+            cols = line.split()
+            # device r/s w/s kr/s kw/s ... (the second report overwrites the first)
+            if len(cols) >= 5 and cols[0] in disks:
+                try:
+                    rate[cols[0]] = float(cols[3]) + float(cols[4])
+                except ValueError:
+                    pass
+        busy = {d for d, kb in rate.items() if kb > 0}
+
+        counts = interface_bytes(net_out)
+        total = sum(counts.get(name, 0) for name in lan_links)
+        net_busy = False
+        if last_bytes is not None and now_time > last_time:
+            net_busy = (total - last_bytes) / (now_time - last_time) > LAN_BUSY
+        last_bytes, last_time = total, now_time
+
+        if busy != disk_busy or net_busy != lan_busy:
+            disk_busy.clear()
+            disk_busy.update(busy)
+            lan_busy = net_busy
+            web_notify()
+
+def bay_state():
+    errors = {n[3] for n in notices if n[0] == 'error'}
+    return [{'disk': disk,
+             'state': 'empty' if not disk else 'error' if disk in errors else 'ok',
+             'busy': disk in disk_busy,
+             'zfs': zfs_labels.get(disk)}   # [pool, name] or None
+            for disk in bay_disks]
+
+def web_state():
+    # no ui_lock: this runs on the web server's threads and only reads
+    with lcd.state_lock:
+        lines = list(lcd.shown)
+    return {
+        'host': HOST,
+        'lines': lines,
+        'backlight': lcd.lit,
+        'status_led': status_led,
+        'status_led_driven': status_led_driven(),
+        'buttons': {'enter': bool(buttons_down & ENTER),
+                    'select': bool(buttons_down & SELECT)},
+        'prompt': prompt_state is not None,
+        'screen': [menu_item + 1, len(menu)],
+        'connected': lcd.connection is not None,
+        'bays': bay_state(),
+        'lan': 'busy' if lan_busy else 'on' if lan_links else 'off',
+    }
+
+def web_press(name):
+    # the same path as the real buttons: press, then release
+    bit = ENTER if name == 'enter' else SELECT
+    with ui_lock:
+        handle_buttons('Switch_Status', bit)
+        handle_buttons('Switch_Status', 0x00)
+
+def parse_listen(value):
+    """'8080', '127.0.0.1:8080' or '[::]:8080' -> (address, port)."""
+    addr, _, port = value.rpartition(':')
+    addr = addr.strip('[]') or '0.0.0.0'
+    try:
+        port = int(port)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'not [ADDRESS:]PORT: {value}')
+    return addr, port
 
 def handle_sigterm(signum, frame):
     # rc.d stop (via daemon(8)) sends SIGTERM; unwind through main()'s finally
     sys.exit(0)
 
 def main():
-    global lcd, args
+    global lcd, args, web
 
     parser = argparse.ArgumentParser(description='QNAP front-panel LCD menu')
     parser.add_argument('--port', default=PORT, help=f'serial device (default {PORT})')
@@ -644,6 +839,9 @@ def main():
     parser.add_argument('--refresh', type=int, default=30, help='seconds between interface/pool rescans (default 30)')
     parser.add_argument('--no-status-led', action='store_true', help='leave the status LED alone')
     parser.add_argument('--no-updates', action='store_true', help='do not check for or offer updates')
+    parser.add_argument('--web', metavar='[ADDRESS:]PORT', type=parse_listen,
+                        help='serve a live web view of the panel (no authentication: '
+                             'anyone who can reach it can press the buttons)')
     args = parser.parse_args()
 
     signal.signal(signal.SIGTERM, handle_sigterm)
@@ -662,6 +860,12 @@ def main():
     threading.Thread(target=scroll_loop, daemon=True).start()
 
     lcd = qnaplcd.QnapLCD(args.port, args.speed, response_handler)
+    if args.web:
+        from qnaplcd.web import WebPanel
+        web = WebPanel(*args.web, web_state, web_press)
+        lcd.on_change = web_notify
+        web.start()
+        threading.Thread(target=activity_loop, daemon=True).start()
     lcd_on()
     lcd.reset()
     lcd.clear()

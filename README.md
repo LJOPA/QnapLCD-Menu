@@ -24,7 +24,8 @@ at the end for reference.
   per network interface and one per ZFS pool. Select moves to the next
   screen; Enter runs the screen's action, where it has one (Updates). Lines
   too long for the 16-column display scroll. The backlight turns off after
-  30 seconds without a button press.
+  30 seconds without a button press. Optionally it serves a web page showing
+  the display, LEDs and buttons (see "Web panel" below).
 - `preinit.py`, `postinit.py`, `shutdown.py`: short scripts that print a status
   message on the display and exit.
 - `qnaplcd/`: a Python module for the A125 display. It uses pyserial and a
@@ -71,7 +72,7 @@ The package installs:
 ### Installing and enabling
 
 ```
-pkg add dist/qnaplcd-menu-1.2.0.pkg
+pkg add dist/qnaplcd-menu-1.3.0.pkg
 sysrc qnaplcd_enable=YES
 service qnaplcd start
 ```
@@ -91,6 +92,46 @@ Optional `rc.conf` settings:
 - `qnaplcd_logfile`: log file (default `/var/log/qnaplcd.log`)
 - `qnaplcd_power_led`: make the power LED steady when the service starts
   (default `YES`)
+- `qnaplcd_web`: serve the web panel on `[ADDRESS:]PORT`, for example `8080`
+  or `192.168.1.10:8080` (default: off)
+
+### Web panel
+
+With `qnaplcd_web` set (or `--web` on the command line), the menu serves a
+page that shows the display, the status and LAN lights, two lights for each
+drive bay and the two buttons, and updates as they change. Clicking a button
+(or pressing Space for Select, Enter for Enter) works exactly like pressing
+the real one, including turning the backlight on.
+
+- Each bay has a health strip (green with a disk, red when a notice reports
+  errors for that disk, off when empty) and beside it an activity light that
+  glows dim green while the disk is busy. Under each bay: its number, disk
+  and the name ZFS knows it by (from `zpool status`, e.g. `DISK-5YD7DCKZ`). Bays 1-6 are
+  AHCI channels 0-5 (the TS-x69's three Marvell controllers), checked on a
+  TS-669.
+- The LAN light is amber while a network port has a link and dims while
+  there is traffic over 4 KB/s (the page's own updates stay below that).
+- Where the NAS has its power strip, the page shows its own connection
+  instead, labelled "web link": green while it is getting updates, red if
+  the connection to the NAS is lost (the buttons are disabled until it is
+  back).
+- USB and eSATA are drawn but not reported.
+
+Disk and network activity are checked once a second, and the disks in the
+bays every 30 seconds, only while a page is open. With no page open the web
+panel runs nothing in the background.
+
+```
+sysrc qnaplcd_web=8080
+service qnaplcd restart
+```
+
+Then open `http://<nas>:8080/`. The page needs no internet access.
+
+**There is no login.** Anyone who can reach the port can use the buttons,
+which includes installing updates and rebooting. Bind it to an address only
+trusted machines can reach (`127.0.0.1:8080` plus an SSH tunnel, or a
+management network), or put it behind a reverse proxy with authentication.
 
 ### Notices
 

@@ -67,7 +67,9 @@ for f in lcd-menu.py preinit.py postinit.py shutdown.py; do
     sed "1s|^#!.*python.*|#!$PYTHON_BIN|" "$TOP/$f" > "$STAGE$PREFIX/$APPDIR/$f"
     chmod 0755 "$STAGE$PREFIX/$APPDIR/$f"
 done
-install -m 0644 "$TOP/qnaplcd/__init__.py" "$STAGE$PREFIX/$APPDIR/qnaplcd/__init__.py"
+for f in __init__.py web.py panel.html; do
+    install -m 0644 "$TOP/qnaplcd/$f" "$STAGE$PREFIX/$APPDIR/qnaplcd/$f"
+done
 
 # power-LED helper: C, because it needs port I/O (FreeBSD's <machine/cpufunc.h>)
 if [ "$ON_FREEBSD" = yes ]; then
@@ -109,6 +111,7 @@ Drives the 2x16 front-panel LCD and its two buttons on QNAP NAS hardware
 running FreeBSD: host, OS version, uptime, IP addresses and ZFS pool usage,
 notices and updates, cycled with the Select button. On the TS-x69 it also
 stops the power LED blinking and shows warnings on the status LED.
+Optionally serves a live web view of the panel for remote use.
 EOD
 messages: [
   { message: <<EOM
@@ -117,9 +120,12 @@ To start the LCD menu now and at every boot:
   sysrc qnaplcd_enable=YES
   service qnaplcd start
 
+To use the panel from a browser (no authentication - pick the address):
+
+  sysrc qnaplcd_web=8080
+
 Settings (qnaplcd_port, qnaplcd_python, qnaplcd_flags, qnaplcd_logfile,
-qnaplcd_power_led)
-are documented at the top of $PREFIX/etc/rc.d/qnaplcd.
+qnaplcd_power_led, qnaplcd_web) are documented at the top of $PREFIX/etc/rc.d/qnaplcd.
 EOM
   }
 ]
