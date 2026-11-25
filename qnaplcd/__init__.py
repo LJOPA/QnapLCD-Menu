@@ -14,7 +14,7 @@ from threading import *
 # Reset        send=0x4d, 0xFF
 
 class QnapLCD:
-    def __init__(self, port='/dev/ttyS1', speed=1200, handler=None):
+    def __init__(self, port='/dev/cuau1', speed=1200, handler=None):
         self.port = port
         self.speed = speed
 

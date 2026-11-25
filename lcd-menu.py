@@ -8,10 +8,12 @@ import subprocess
 import socket
 import threading
 import json
+import re
+import shutil
 
 DISPLAY_TIMEOUT = 30    # seconds
 
-PORT = '/dev/ttyS1'     # same as default
+PORT = '/dev/cuau1'     # same as default
 PORT_SPEED = 1200
 
 lcd = None
@@ -38,11 +40,18 @@ def show_version():
     lcd.write(0, [sys_name, sys_vers])
 
 def show_truenas():
-    truenas = shell('cli -c \'system version\'')
-    truenas = truenas.split('-')
+    # TrueNAS CORE exposes the middleware `cli`. Plain FreeBSD does not -
+    # fall back to freebsd-version so the script still works there.
+    if shutil.which('cli'):
+        truenas = shell('cli -c \'system version\'').split('-')
+        line1, line2 = '-'.join(truenas[:-1]), truenas[-1]
+    else:
+        vers = shell('freebsd-version -u').split('-', 1)
+        line1 = f'FreeBSD {vers[0]}'
+        line2 = vers[1] if len(vers) > 1 else ''
 
     lcd.clear()
-    lcd.write(0, ['-'.join(truenas[:-1]), truenas[-1]])
+    lcd.write(0, [line1, line2])
 
 def show_uptime():
     uptime = shell('uptime').split(',')
@@ -53,37 +62,59 @@ def show_uptime():
 
 ip_addresses = []
 def add_ips_to_menu():
-    def get_kind(iface):
-        if 'linkinfo' in iface:
-            if 'info_kind' in iface['linkinfo']:
-                return iface['linkinfo']['info_kind']
-            elif 'info_slave_kind' in iface['linkinfo']:
-                return 'slave'
+    # FreeBSD has no `ip -json` equivalent, so parse `ifconfig -a` text output.
+    # Interface blocks start at column 0 ("em0: flags=..."); everything indented
+    # underneath belongs to that interface.
+    output = shell('ifconfig -a')
 
-        return ''
+    interfaces = {}
+    order = []
+    current = None
 
-    def get_details(iface, kind):
-        if 'addr_info' in iface:
-            if kind == 'slave':
-                return iface['operstate']
-            else:
-                for addr in iface['addr_info']:
-                    if addr['family'] == 'inet':
-                        return addr['local']
+    iface_re = re.compile(r'^(\S+?):')
+    laggport_re = re.compile(r'^laggport:\s+(\S+)')
 
-        return '0.0.0.0'
+    for line in output.split('\n'):
+        if line and not line[0].isspace():
+            match = iface_re.match(line)
+            if not match:
+                current = None
+                continue
+            name = match.group(1)
+            current = {'addr': None, 'status': 'down', 'is_member': False}
+            interfaces[name] = current
+            order.append(name)
+        elif current is not None:
+            stripped = line.strip()
 
-    ip_json = json.loads(shell('ip -details -json address show'))
+            if stripped.startswith('inet ') and current['addr'] is None:
+                # inet 192.168.1.10 netmask 0xffffff00 broadcast 192.168.1.255
+                parts = stripped.split()
+                if len(parts) > 1:
+                    current['addr'] = parts[1]
+
+            elif stripped.startswith('status:'):
+                current['status'] = stripped.split(':', 1)[1].strip()
+
+            member_match = laggport_re.match(stripped)
+            if member_match:
+                member = member_match.group(1)
+                if member in interfaces:
+                    interfaces[member]['is_member'] = True
+
     ip_addresses.clear()
-    for iface in ip_json:
-        if iface['link_type'] == 'loopback':
+    for name in order:
+        if name == 'lo0':
             continue
 
-        kind = get_kind(iface)
-        if kind not in ['', 'tun', 'bond', 'slave']:
-            continue
+        iface = interfaces[name]
 
-        ip_addresses.append(( iface['ifname'], get_details(iface, kind)))
+        # lagg (FreeBSD bonding) members carry no IP of their own -
+        # show link status instead, matching a Linux bond slave.
+        if iface['is_member']:
+            ip_addresses.append((name, iface['status']))
+        else:
+            ip_addresses.append((name, iface['addr'] or '0.0.0.0'))
 
     while show_ip in menu:
         menu.remove(show_ip)
