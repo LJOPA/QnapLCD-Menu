@@ -41,7 +41,9 @@ timer_gen = 0       # bumped by lcd_on(), so a timer that fired late does nothin
 backlight_on = False
 
 def lcd_off(gen=None):
-    """Backlight off, and back to the overview for the next wake-up."""
+    """Backlight off, and back to the overview for the next wake-up. The
+    screen is blanked too, and stays blank (nothing is drawn, so the web
+    panel shows it blank as well) until it wakes."""
     global backlight_on, prompt_state
     with ui_lock:
         if gen is not None and gen != timer_gen:
@@ -53,7 +55,12 @@ def lcd_off(gen=None):
         go_home()
         backlight_on = False
         lcd.backlight(False)
-        draw_current()
+        redraw()
+        lcd.clear()
+
+def display_active():
+    """Draw only while the backlight is on."""
+    return backlight_on
 
 def lcd_on():
     """Backlight on, and (re)start the timer that turns it off: longer on
@@ -126,6 +133,9 @@ def show(line1, line2='', ticker_line=False, later=None):
     restart a scrolling line."""
     global scroll_tick, ticker, loops_done, title, title_later, drawn_at
     with ui_lock:
+        if not display_active():
+            redraw()    # drawn afresh when it wakes
+            return
         same = title == line1 and title_later == later
         if same and ticker_line and ticker:
             if display[1] != line2:
@@ -787,6 +797,9 @@ def go_home():
     stack[:] = [['Main', 0]]
 
 def draw_current():
+    if not display_active():
+        redraw()        # nobody watching: skip the work, draw on wake-up
+        return
     if alert:
         show_alert()
     else:
@@ -955,6 +968,7 @@ def handle_buttons(command, data):
         if data & 0x03:
             if not held and not backlight_on:
                 waking = True
+                lcd_on()
                 redraw()            # start the status ticker from the top
                 draw_current()
             held |= data & 0x03

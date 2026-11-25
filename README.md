@@ -139,8 +139,9 @@ notices (`*`) if there are any (`voyager    !2 *1`). Below it a short line runs 
 by name, a scrub's progress and time left, uptime, how full each pool is,
 and how many updates are waiting (or "Reboot needed"). The details are in
 the menus. It stays lit for two minutes; other screens for 30
-seconds. When the display goes dark it goes back to the overview, and a
-button pressed while it is dark only wakes it.
+seconds. When the backlight goes off the display is blanked and nothing is
+drawn on it (the web panel shows it blank too) until it wakes, when it
+starts again at the overview. A button pressed while it is dark only wakes it.
 
 Select moves to the next screen, Enter opens or does what the screen offers
 (a `>` on the top line, beside the Enter button, or an "Enter: ..." hint).
