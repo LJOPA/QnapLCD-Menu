@@ -69,6 +69,12 @@ for f in lcd-menu.py preinit.py postinit.py shutdown.py; do
 done
 install -m 0644 "$TOP/qnaplcd/__init__.py" "$STAGE$PREFIX/$APPDIR/qnaplcd/__init__.py"
 
+# power-LED helper: C, because it needs port I/O (FreeBSD's <machine/cpufunc.h>)
+if [ "$ON_FREEBSD" = yes ]; then
+    ${CC:-cc} -O2 -Wall -o "$STAGE$PREFIX/$APPDIR/qnapled" "$TOP/qnapled/qnapled.c"
+    chmod 0755 "$STAGE$PREFIX/$APPDIR/qnapled"
+fi
+
 sed -e "s|%%PREFIX%%|$PREFIX|g" -e "s|%%PYTHON%%|$PYTHON_BIN|g" \
     "$TOP/rc.d/qnaplcd" > "$STAGE$PREFIX/etc/rc.d/qnaplcd"
 chmod 0755 "$STAGE$PREFIX/etc/rc.d/qnaplcd"
@@ -101,7 +107,8 @@ deps: {
 desc: <<EOD
 Drives the 2x16 front-panel LCD and its two buttons on QNAP NAS hardware
 running FreeBSD: host, OS version, uptime, IP addresses and ZFS pool usage,
-cycled with the up/down buttons.
+cycled with the up/down buttons. On the TS-x69 it also stops the power
+LED blinking.
 EOD
 messages: [
   { message: <<EOM
@@ -110,7 +117,8 @@ To start the LCD menu now and at every boot:
   sysrc qnaplcd_enable=YES
   service qnaplcd start
 
-Settings (qnaplcd_port, qnaplcd_python, qnaplcd_flags, qnaplcd_logfile)
+Settings (qnaplcd_port, qnaplcd_python, qnaplcd_flags, qnaplcd_logfile,
+qnaplcd_power_led)
 are documented at the top of $PREFIX/etc/rc.d/qnaplcd.
 EOM
   }
@@ -122,7 +130,7 @@ if [ "$ON_FREEBSD" = yes ]; then
     echo "built: $OUTDIR/$PKGNAME-$VERSION.pkg (depends on $PYTHON_PKG, $PYSERIAL_PKG)"
 else
     tar -czf "$OUTDIR/$PKGNAME-$VERSION-stage.tar.gz" -C "$STAGE" .
-    echo "not on FreeBSD: skipped pkg create (dependency versions in the manifest are placeholders)"
+    echo "not on FreeBSD: skipped pkg create and the qnapled build (dependency versions in the manifest are placeholders)"
     echo "staged tree: $STAGE"
     echo "tarball:     $OUTDIR/$PKGNAME-$VERSION-stage.tar.gz"
 fi

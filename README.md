@@ -27,6 +27,8 @@ at the end for reference.
   message on the display and exit.
 - `qnaplcd/`: a Python module for the A125 display. It uses pyserial and a
   background thread to pass button events to the calling program.
+- `qnapled/qnapled.c`: a small C program that stops the power LED blinking on
+  the TS-x69 (see "Power LED" below).
 - `rc.d/qnaplcd`: an rc.d service that runs the menu under `daemon(8)`.
 - `packaging/build-pkg.sh`: builds a FreeBSD package containing the above.
 
@@ -60,13 +62,14 @@ to build for a different version.
 
 The package installs:
 
-- `/usr/local/libexec/qnaplcd/`: the scripts and the `qnaplcd` module
+- `/usr/local/libexec/qnaplcd/`: the scripts, the `qnaplcd` module and the
+  `qnapled` program (built with the base system's `cc`)
 - `/usr/local/etc/rc.d/qnaplcd`: the service script
 
 ### Installing and enabling
 
 ```
-pkg add dist/qnaplcd-menu-1.0.0.pkg
+pkg add dist/qnaplcd-menu-1.1.0.pkg
 sysrc qnaplcd_enable=YES
 service qnaplcd start
 ```
@@ -83,6 +86,23 @@ Optional `rc.conf` settings:
 - `qnaplcd_flags`: extra arguments for `lcd-menu.py`, for example
   `"--refresh 60"`
 - `qnaplcd_logfile`: log file (default `/var/log/qnaplcd.log`)
+- `qnaplcd_power_led`: make the power LED steady when the service starts
+  (default `YES`)
+
+### Power LED
+
+On QNAP's own OS the power LED blinks while the NAS boots and goes steady
+once it is up. Under FreeBSD nothing tells it to stop, so it blinks forever.
+
+On the TS-x69 the LED is driven by the motherboard's IT8721F Super I/O chip
+(pin GP40). The firmware connects that pin to the chip's built-in blinker.
+`qnapled steady` disconnects the blinker and turns the LED on; the service
+runs it at start. `qnapled blink` puts the firmware's setting back, and
+`qnapled status` shows the registers. It needs root.
+
+`qnapled` does nothing unless it finds an IT8721F whose blinker is on GP40,
+so it should be harmless on other models, but it has only been tried on a
+TS-669.
 
 ### Running without the package
 

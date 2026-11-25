@@ -17,6 +17,9 @@
 # qnaplcd_flags (str):     Extra arguments for lcd-menu.py (e.g. "--refresh 60").
 # qnaplcd_logfile (str):   Where the menu's output goes.
 #                          Default: "/var/log/qnaplcd.log"
+# qnaplcd_power_led (bool): Make the power LED steady instead of blinking
+#                          (TS-x69 / IT8721F only; a no-op elsewhere).
+#                          Default: "YES"
 
 . /etc/rc.subr
 
@@ -30,6 +33,7 @@ load_rc_config $name
 : ${qnaplcd_python:="%%PYTHON%%"}
 : ${qnaplcd_logfile:="/var/log/qnaplcd.log"}
 : ${qnaplcd_home:="%%PREFIX%%/libexec/qnaplcd"}
+: ${qnaplcd_power_led:="YES"}
 
 pidfile="/var/run/${name}.pid"
 command="/usr/sbin/daemon"
@@ -54,6 +58,11 @@ qnaplcd_prestart()
 	fi
 	if [ ! -c "${qnaplcd_port}" ]; then
 		warn "${qnaplcd_port} is not a character device; the display will not respond"
+	fi
+	# the firmware leaves the power LED blinking; QNAP's OS would stop it
+	if checkyesno qnaplcd_power_led && [ -x "${qnaplcd_home}/qnapled" ]; then
+		"${qnaplcd_home}/qnapled" steady >/dev/null ||
+		    warn "qnapled could not make the power LED steady"
 	fi
 }
 
