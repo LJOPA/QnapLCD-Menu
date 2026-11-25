@@ -60,7 +60,8 @@ PYSERIAL_PKG_VERSION=$(dep_version "$PYSERIAL_PKG")
 
 # --- stage -----------------------------------------------------------------
 rm -rf "$WORK"
-mkdir -p "$STAGE$PREFIX/$APPDIR/qnaplcd" "$STAGE$PREFIX/etc/rc.d" "$OUTDIR"
+mkdir -p "$STAGE$PREFIX/$APPDIR/qnaplcd" "$STAGE$PREFIX/etc/rc.d" \
+    "$STAGE$PREFIX/etc/newsyslog.conf.d" "$OUTDIR"
 
 for f in lcd-menu.py preinit.py postinit.py shutdown.py; do
     # pin the shebang: FreeBSD has no `python3` unless the python3 metaport is installed
@@ -80,6 +81,8 @@ fi
 sed -e "s|%%PREFIX%%|$PREFIX|g" -e "s|%%PYTHON%%|$PYTHON_BIN|g" \
     "$TOP/rc.d/qnaplcd" > "$STAGE$PREFIX/etc/rc.d/qnaplcd"
 chmod 0755 "$STAGE$PREFIX/etc/rc.d/qnaplcd"
+install -m 0644 "$TOP/packaging/newsyslog/qnaplcd.conf" \
+    "$STAGE$PREFIX/etc/newsyslog.conf.d/qnaplcd.conf"
 
 # --- packing list (paths relative to PREFIX) -------------------------------
 PLIST="$WORK/plist"
