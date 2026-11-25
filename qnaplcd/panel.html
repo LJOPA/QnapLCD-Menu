@@ -206,7 +206,10 @@
     padding: 0 1.4cqi;
   }
   #bay-strips { justify-items: center; }
-  .bay-lights { display: flex; align-items: center; gap: .9cqi; }
+  /* the health strip is centred over the label; the activity dot hangs
+     off its right end so it doesn't push the strip sideways */
+  .bay-lights { position: relative; display: flex; align-items: center; }
+  .bay-lights .act { position: absolute; left: calc(100% + .9cqi); }
   .bay-lights .bar { width: 4.4cqi; }
   .bay-lights .dot { width: 1cqi; height: 1cqi; min-width: 5px; min-height: 5px; }
   /* under each bay strip: its number and disk */
