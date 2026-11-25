@@ -19,13 +19,11 @@ at the end for reference.
 
 ## Contents
 
-- `lcd-menu.py`: a menu similar to the stock QNAP one. It shows the host name
-  and OS version, uptime, notices (see below), available updates, one screen
-  per network interface and one per ZFS pool. Select moves to the next
-  screen; Enter runs the screen's action, where it has one (Updates). Lines
-  too long for the 16-column display scroll. The backlight turns off after
-  30 seconds without a button press. Optionally it serves a web page showing
-  the display, LEDs and buttons (see "Web panel" below).
+- `lcd-menu.py`: the front-panel menu (see "The menu" below): a scrolling
+  overview, then Status, Info and Maintenance submenus with notices,
+  pools, network addresses, updates, scrubs, reboot and shutdown. Optionally
+  it serves a web page showing the display, LEDs and buttons (see "Web
+  panel" below).
 - `preinit.py`, `postinit.py`, `shutdown.py`: short scripts that print a status
   message on the display and exit.
 - `qnaplcd/`: a Python module for the A125 display. It uses pyserial and a
@@ -72,7 +70,7 @@ The package installs:
 ### Installing and enabling
 
 ```
-pkg add dist/qnaplcd-menu-1.3.0.pkg
+pkg add dist/qnaplcd-menu-1.4.0.pkg
 sysrc qnaplcd_enable=YES
 service qnaplcd start
 ```
@@ -133,25 +131,59 @@ which includes installing updates and rebooting. Bind it to an address only
 trusted machines can reach (`127.0.0.1:8080` plus an SSH tunnel, or a
 management network), or put it behind a reverse proxy with authentication.
 
+### The menu
+
+The display wakes up to the overview. The top line says `1. Overview` for three
+seconds, then the host name, followed by the number of warnings (`!`) and
+notices (`*`) if there are any (`voyager    !2 *1`). Below it a short line runs round and round: warnings
+by name, a scrub's progress and time left, uptime, how full each pool is,
+and how many updates are waiting (or "Reboot needed"). The details are in
+the menus. It stays lit for two minutes; other screens for 30
+seconds. When the backlight goes off the display is blanked and nothing is
+drawn on it (the web panel shows it blank too) until it wakes, when it
+starts again at the overview. A button pressed while it is dark only wakes it.
+
+Select moves to the next screen, Enter opens or does what the screen offers
+(a `>` on the top line, beside the Enter button, or an "Enter: ..." hint).
+The overview is page 1; Enter (or Select) moves on to the menus, pages 2-4:
+
+| Menu | Screens |
+|---|---|
+| 2. Status | one per notice (or "none"), one per pool: health and usage |
+| 3. Info | host and architecture, FreeBSD version, uptime and load, one per network interface |
+| 4. Maintenance | Updates, a Scrub screen per pool (the last scrub's date, or progress and time left; start, or stop a running scrub), Reboot, Shut down |
+
+Each submenu ends with Back. Anything that changes the system asks first.
+Lines too long for the 16-column display scroll.
+
 ### Notices
 
-The Notices screens list anything worth a look, and the status LED shows
+The Status menu lists anything worth a look, and the status LED shows
 the worst of them:
 
 | Status LED | Meaning | Notices |
 |---|---|---|
 | steady green | all fine | none |
-| alternating red/green | routine maintenance | a pool scrubbing or resilvering (with % done) |
-| steady red | errors | a pool not ONLINE, read/write/checksum errors on a disk, data errors, or a SMART problem (failed health check, reallocated, pending or uncorrectable sectors) |
+| alternating red/green | routine maintenance | a pool scrubbing or resilvering (with % done and time left) |
+| steady red | errors | a pool not ONLINE, read/write/checksum errors on a disk, data errors, a SMART problem (failed health check, reallocated, pending or uncorrectable sectors), or a network port losing its link |
 
-A new error also turns the backlight on and jumps to its notice. Pools are
-checked every refresh; SMART (needs `smartmontools`) once an hour.
+A new notice wakes the display and scrolls past twice, then the display
+goes dark again. A new warning (an error) stays lit until a button is
+pressed. Either way the next screen is the overview. Pools are checked
+every refresh; SMART (needs `smartmontools`) once an hour.
+
+A network port warns when it loses its link, as soon as devd(8) reports it
+(otherwise at the next refresh). Only ports that have had a link since the
+service started count, so a port that was never plugged in stays quiet; the
+warning clears when the link comes back. With lagg(4), a member port down
+reads `em1 link down` / `port of lagg0, lagg0 still up`, and with every port
+down there is one warning for the lagg itself.
 
 ### Updates
 
 The Updates screen shows how many package updates (`pkg`) and whether base
 system updates (`freebsd-update`) are waiting. It checks a minute after
-start and then every six hours. To install, go to the Updates screen and
+start and then every six hours. To install, go to Maintenance > Updates and
 press Enter. Questions are labelled beside the buttons (Enter is beside the
 top line, Select beside the bottom one): Enter always confirms and Select
 backs out, as does waiting 30 seconds.

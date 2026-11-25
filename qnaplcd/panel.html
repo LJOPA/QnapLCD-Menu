@@ -290,6 +290,8 @@
 
 <script>
 const COLS = 16;
+// the LCD's character ROM (HD44780 "A00") differs from ASCII in three places
+const ROM = {'\\': '\u00a5', '~': '\u2192', '\x7f': '\u2190'};
 const esc = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const $ = id => document.getElementById(id);
 const LAN = { off: ['', 'LAN: no link'], on: [' amber', 'LAN: link'], busy: [' amber dim', 'LAN: link, traffic'] };
@@ -304,14 +306,14 @@ function render(s) {
   $('lcd').classList.toggle('lit', s.backlight);
   s.lines.forEach((text, r) => {
     const cells = rows[r].children;
-    for (let i = 0; i < COLS; i++) cells[i].textContent = text[i] || ' ';
+    for (let i = 0; i < COLS; i++) cells[i].textContent = ROM[text[i]] || text[i] || ' ';
   });
   $('status').className = 'lamp dot' + (s.status_led ? ' ' + s.status_led : '');
   $('status-wrap').classList.toggle('undriven', !s.status_led_driven);
   $('status-wrap').title = s.status_led_driven ? '' : 'not driven on this machine (no qnapled or --no-status-led)';
   $('enter').classList.toggle('down', s.buttons.enter);
   $('select').classList.toggle('down', s.buttons.select);
-  $('screen').textContent = s.prompt ? 'Enter = yes, Select = no' : `screen ${s.screen[0]} of ${s.screen[1]}`;
+  $('screen').textContent = s.prompt ? 'Enter = yes, Select = no' : s.screen;
   $('warn').textContent = s.connected ? '' : 'serial port not open';
   const [lanClass, lanTitle] = LAN[s.lan];
   $('lan').className = 'lamp dot' + lanClass;
