@@ -165,12 +165,19 @@ the worst of them:
 |---|---|---|
 | steady green | all fine | none |
 | alternating red/green | routine maintenance | a pool scrubbing or resilvering (with % done and time left) |
-| steady red | errors | a pool not ONLINE, read/write/checksum errors on a disk, data errors, or a SMART problem (failed health check, reallocated, pending or uncorrectable sectors) |
+| steady red | errors | a pool not ONLINE, read/write/checksum errors on a disk, data errors, a SMART problem (failed health check, reallocated, pending or uncorrectable sectors), or a network port losing its link |
 
 A new notice wakes the display and scrolls past twice, then the display
 goes dark again. A new warning (an error) stays lit until a button is
 pressed. Either way the next screen is the overview. Pools are checked
 every refresh; SMART (needs `smartmontools`) once an hour.
+
+A network port warns when it loses its link, as soon as devd(8) reports it
+(otherwise at the next refresh). Only ports that have had a link since the
+service started count, so a port that was never plugged in stays quiet; the
+warning clears when the link comes back. With lagg(4), a member port down
+reads `em1 link down` / `port of lagg0, lagg0 still up`, and with every port
+down there is one warning for the lagg itself.
 
 ### Updates
 

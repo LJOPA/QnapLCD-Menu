@@ -257,7 +257,7 @@ def find_ips():
                 current = None
                 continue
             name = match.group(1)
-            current = {'addr': None, 'status': 'down', 'is_member': False}
+            current = {'addr': None, 'status': None, 'lagg': None}
             interfaces[name] = current
             order.append(name)
         elif current is not None:
@@ -276,32 +276,81 @@ def find_ips():
             if member_match:
                 member = member_match.group(1)
                 if member in interfaces:
-                    interfaces[member]['is_member'] = True
+                    interfaces[member]['lagg'] = name
 
     found = []
-    active = []     # ports with a link, for the web panel's LAN light
+    links = {}      # interface -> {'status', 'lagg'}, for those with a link status
     for name in order:
         if name == 'lo0':
             continue
 
         iface = interfaces[name]
-        if iface['status'] == 'active':
-            active.append(name)
+        if iface['status']:
+            links[name] = {'status': iface['status'], 'lagg': iface['lagg']}
 
         # lagg (FreeBSD bonding) members carry no IP of their own -
         # show link status instead, matching a Linux bond slave.
-        if iface['is_member']:
-            found.append((name, iface['status']))
+        if iface['lagg']:
+            found.append((name, iface['status'] or 'down'))
         else:
             found.append((name, iface['addr'] or '0.0.0.0'))
-    return found, active
+    return found, links
 
+#
+# Link watch: a port that has had a link since the service started and
+# loses it is a warning. With lagg, a member port down while the lagg is up
+# says so; with the whole lagg down, one warning for the lagg (not one per
+# port). devd(8) reports LINK_UP / LINK_DOWN as they happen (devd_loop), so
+# this doesn't wait for the next refresh.
+#
+link_seen = set()   # interfaces seen with "status: active"
+
+def link_notices(links):
+    for name in list(link_seen):
+        if name not in links:
+            link_seen.discard(name)     # interface removed: on purpose
+    link_seen.update(n for n, l in links.items() if l['status'] == 'active')
+    down = {n for n in link_seen if links[n]['status'] != 'active'}
+    found = []
+    for name in sorted(down):
+        lagg = links[name]['lagg']
+        if lagg in down:
+            continue                    # covered by the lagg's own warning
+        if lagg:
+            detail = f'port of {lagg}, {lagg} still up'
+        elif any(l['lagg'] == name for l in links.values()):
+            detail = 'all ports down'
+        else:
+            detail = links[name]['status']    # "no carrier"
+        found.append(('error', f'{name} link down', detail, None))
+    return found
+
+DEVD_PIPE = '/var/run/devd.pipe'
+
+def devd_loop():
+    """Refresh at once when devd reports a link change:
+         !system=IFNET subsystem=em0 type=LINK_DOWN"""
+    import socket
+    last_error = None
+    while True:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                sock.connect(DEVD_PIPE)
+                last_error = None
+                for line in sock.makefile('r', errors='replace'):
+                    if 'system=IFNET' in line and re.search(r'type=LINK_(UP|DOWN)', line):
+                        refresh_now.set()
+        except OSError as e:
+            if str(e) != last_error:    # once, not every minute
+                print(f'devd: {e}; link changes wait for the next refresh', file=sys.stderr)
+            last_error = str(e)
+        time.sleep(60)  # devd restarting, or not there (not FreeBSD)
 
 def show_ip(index):
     name, addr = ip_addresses[index]
     show(name, addr)
 
-lan_links = []      # interfaces with link (ifconfig "status: active")
+lan_links = []      # interfaces with link, lagg members left out (the lagg counts their traffic)
 
 #
 # ZFS pools
@@ -838,13 +887,14 @@ refresh_now = threading.Event()
 def refresh():
     global zfs_labels
     ips, links = find_ips()
+    active = [n for n, l in links.items() if l['status'] == 'active' and not l['lagg']]
     pools = find_zpools()
     found, labels, scans = pool_notices()
     with ui_lock:
         ip_addresses[:] = ips
-        lan_links[:] = links
+        lan_links[:] = active
         zfs_pools[:] = pools
-        notices[:] = found + smart_notices
+        notices[:] = found + link_notices(links) + smart_notices
         zfs_labels = labels     # replaced whole: web threads read it unlocked
         pool_scans.clear()
         pool_scans.update(scans)
@@ -1184,6 +1234,7 @@ def main():
     if not args.no_updates:
         threading.Thread(target=update_loop, daemon=True).start()
     threading.Thread(target=smart_loop, daemon=True).start()
+    threading.Thread(target=devd_loop, daemon=True).start()
     threading.Thread(target=scroll_loop, daemon=True).start()
 
     with ui_lock:
